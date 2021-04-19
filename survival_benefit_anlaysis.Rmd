@@ -1,0 +1,331 @@
+---
+title: "Survival Benefit of Kidney Transplantation"
+authors: William F Parker, MD, MS, Yolanda Becker MD, Robert Gibbons, PhD
+output:
+  html_notebook:
+    theme: journal
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+    toc_depth: '2'
+---
+
+
+```{r global_options, include=FALSE, cache = FALSE}
+library(knitr)
+opts_chunk$set(cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, linewidth=60)
+```
+
+
+```{r packages,  warning= FALSE, message= FALSE, cache = FALSE}
+library(survival)
+library(coxme)
+library(tidyverse)
+```
+
+
+```{r}
+to_model <- read_csv("clean_data.csv")
+```
+
+
+```{r}
+to_model <-to_model %>% 
+  select(-CAN_LISTING_DT, -CAN_LAST_ACT_STAT_DT, -CAN_LAST_INACT_STAT_DT, -REC_TX_DT, -TFL_LAFUDATE, -last_date_waitlist)
+```
+
+# Dataset 
+
+In the SRTR dataset, we have the following data. Candidates subscripted by $i$, centers $k$, and donors $j$
+
+* Candidate Covariates $X_{ik}(t)$, some time-varying and some time-independendent
+    + Candidate survival and follow-up time ($Y_{ik}$, $T_{ik}$)
+        * Includes both waitlist and post-transplant periods
+    + Time-dependent indicator variable for transplantation $Tx_{i}(t)$
+        * For each observed transplant
+            * Donor Covariates $W_{j}$
+            * Ischemic time $I_{ikj}$
+
+```{r, echo=FALSE}
+to_model %>% 
+  tail() %>%
+  select(-PERS_ID, -raw_epts, -mean_centered_age, -age_floor_25, -log_dial_time, -no_dial) %>%
+  kable(col.names = c("Patient ID", "Center ID", "time start", "time stop", "transplant status", "dead", "age", "dialysis time (years)", "diabetes", "Previous transplant", "KDRI"), digits = 2)
+```
+
+
+
+# Model Structure
+
+We model the survival of kidney patients on the waitlist using a cox proportional hazards model with transplantation as a time dependent covariate 
+\begin{align*}
+    h_{ik}(t) = & h_0(t)*exp(\beta_{0k} + X_{ikt}\mathbf{\beta} + \beta_{1k}Tx_{ik} + \\
+    & \Pi*(W_{j}*Tx_{ik}) + \gamma(I_{ikj}*Tx_{ik})) + \alpha(W_{j}*Tx_{ik}*X_{ik}) 
+\end{align*}
+
+Where:
+
+$$\beta_{0k} = \nu_{k0}$$
+$$\beta_{1k} = \beta_1 + \nu_{k1}$$
+
+$$(\nu_{k0}, \nu_{k1}) \sim N(0, \Sigma)$$
+
+$$\Sigma = \begin{pmatrix} \sigma_0^2 & \sigma_{01} \\
+\sigma_{01} & \sigma_1^2
+\end{pmatrix}$$
+
+this model includes:
+
+* A random intercept $\nu_{0k}$ for each center, representing waitlist risk at that center. Note there is no fixed effect intercept (as this is a proportional hazards model, so the "intercept" is the baseline hazard function $H_0(t)$)
+* A random transplant effect $\beta_{1k}$, which represents the change in hazard from transplant at a particular center
+* A covariance matrix $\Sigma$ for the random effects, which allows for the intercept at transplant effect to be correlated
+* A vector of interaction effects to allow survival benefit to vary by
+    * $\Pi$: donor characteristics $W_j$
+    * $\gamma$: ischemic time
+    * $\alpha$: donor and recipient $W_j * X_{ik}(t)$
+```{r}
+empty_model <- "Surv(t_1, t_2, dead) ~ tx"
+
+epts_kdri <- "Surv(t_1, t_2, dead) ~ raw_epts*tx + tx_kdri + tx_kdri:raw_epts"
+
+full_can_cov_kdri <-  "Surv(t_1, t_2, dead) ~ (mean_centered_age + dialysis_time_years + diabetes + CAN_PREV_TX)*tx + tx_kdri + (mean_centered_age + dialysis_time_years + diabetes + CAN_PREV_TX):tx_kdri"
+
+epts_covariates <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri"
+  
+formulas <- c(empty_model, epts_kdri, full_can_cov_kdri, epts_covariates)
+
+fe_models <- vector(mode = "list", length(formulas))
+hz_list <- vector(mode = "list", length(formulas))
+
+for (i in seq_along(formulas)) {
+  coxph_fe <- coxph(as.formula(formulas[[i]]), to_model)
+  print(formulas[[i]])
+  print(coxph_fe)
+  fe_models[[i]] <- coxph_fe
+
+  #estimate baseline hazard function when all covariates equal to zero 
+  # Status 1A, after "Status 1A", low risk donor
+  basehz <- basehaz(coxph_fe, centered=FALSE) 
+  # %>% 
+  #   mutate(hz_t = if_else(time ==1, hazard, (hazard - lag(hazard))/(time -lag(time))), 
+  #          hz_t_time = if_else(time ==1, hz_t*time, hz_t*(time -lag(time))), 
+  #          cum_hz = cumsum(hz_t_time)) %>% select(time, hz_t)
+
+  hz_list[[i]] <- basehz
+}
+```
+
+
+```{r fit_me_model}
+
+me_models <-  vector(mode = "list", length(formulas))  
+
+
+for (i in seq_along(formulas)) {
+  f_coxme <- as.formula(paste(formulas[[i]], " + (1+ tx|center)"))
+  start_time <- Sys.time()
+  cur_model <- coxme(f_coxme, data = to_model)
+  me_models[[i]] <- cur_model
+  end_time <- Sys.time()
+  diff_time <- end_time - start_time
+  print(f_coxme)
+  print(diff_time)
+}
+
+
+save.image("model_fit.RData")
+```
+
+```{r}
+summary(me_models[[4]])
+```
+
+
+```{r}
+#load("model_fit.RData")
+```
+
+
+## Between-center variance in transplant benefit on log hazard scale 
+
+Here we write a function to calculate the between center combination in the survival benefit of transplant on the log hazard scale
+
+$survivalBenefit_i = \nu_{1i} - \nu_{0i}$
+
+$Var(\nu_{i1} - \nu_{i0}) = Var(v_{1i}) + Var(\nu_{0i}) - 2*Cov(v_{1i}, v_{0i})$
+
+and finally since `coxme` returns the correlation between the random effects
+
+$Cov(v_{1i}, v_{0i}) = Corr(v_{1i}, v_{0i})*\sigma_{v_{0i}}\sigma_{v_{1i}}$
+
+```{r var_tx_benefit}
+variance_survival_benefit <- function(me_cox){
+  variance_est <- me_cox$vcoef[[1]]
+  
+  var_wait <- variance_est[[1,1]]
+  var_tx <- variance_est[[2,2]]
+  cov_tx_wait <- variance_est[[1,2]]*sqrt(variance_est[[1,1]])*sqrt(variance_est[[2,2]])
+  
+  return(var_wait + var_tx - 2*cov_tx_wait)
+}
+
+
+```
+
+```{r}
+variance_survival_benefit(me_models[[3]])
+```
+
+
+# Survival Benefit Calculations
+
+
+Scenario: Candidate $X_{ik}$ is waiting a receives an offer for kidney $W_j$ which will suffer ischemic time $I_{ikj}$ in transit. The model can generate counterfactuals for survival with and without transplant.
+
+1. Calculate the hazard function for the patient with and without transplant
+    * **with transplant**: $$h_{ijk}(t|transplant) = h_0(t)*(exp(\beta_{0k} + X_{ikt}\mathbf{\beta} + \beta_{1k}  + \Pi*(W_{j}) + \gamma(I_{ikj})) + \alpha(W_{j}*X_{ik})$$
+    * **without transplant** $$h_{ik}(t|wait) = h_0(t)*(exp(\beta_{0k} + X_{ikt}\mathbf{\beta})$$
+2. Construct survival functions from the hazard functions, assuming that the patient will remain waiting forever
+    * **with transplant**: $$S(t|transplant)_{ijk} = exp(-\int_{t_{tx}}^t h_{ijk}(t|transplant)) dt$$
+    * **without transplant**: $$S(t|wait)_{ik} = exp(-\int_{t_{tx}}^t h_{ik}(t|wait)) dt$$
+3. Calculate the survival benefit at various points in time 
+    * $Benefit(1-year)_{ijk} = S(365 days|transplant)_{ijk} - S(365 days|wait)_{ik}$
+    * $Benefit(5-year)_{ijk} = S(1825 days|transplant)_{ijk} - S(1825 days|wait)_{ik}$
+
+
+
+## log HR with transplant
+
+```{r}
+full_me_model <- me_models[[4]]
+```
+
+```{r}
+log_hazard_w_tx <- function(model, ctr_id, Age, d_time, diabetes, CAN_PREV_TX, tx_kdri){
+  no_dial <- ifelse(d_time == 0, 1,0)
+  age_floor_25 <- ifelse(Age < 25, 0, Age - 25)
+  log_dial_time <- log(d_time + 1)
+  
+  user_patient_params <- c(age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX, tx_kdri)
+  
+  names(user_patient_params) <- c("age_floor_25", "log_dial_time", "no_dial", "diabetes",  "CAN_PREV_TX", "tx_kdri")
+  
+  fixed_effects <- fixef(model)
+  x_vars <- names(fixed_effects)
+  ref <- data.frame(ranef(model)[[1]])
+  ref$center <- row.names(ref)
+  tx_ref <- filter(ref, center == ctr_id)$tx
+  int_ref <- filter(ref, center == ctr_id)$Intercept
+  
+  h_out <- tx_ref + unname(fixed_effects['tx']) +int_ref
+  
+  for (x in names(user_patient_params)) {
+        value <- unname(user_patient_params[x])
+        if (x != "tx_kdri"){
+  
+          int_var <- paste0(x, ":tx")
+          kdri_int <- paste0(x, ":tx_kdri")
+          
+          add_hz <- value*(unname(fixed_effects[x]) + 
+                             unname(fixed_effects[int_var]) + 
+                             unname(fixed_effects[kdri_int])*tx_kdri)
+      	  h_out <- h_out + add_hz
+        } else {
+          value <- unname(user_patient_params[x])
+          add_hz <- value*(unname(fixed_effects[x]))
+          h_out <- h_out + add_hz
+        }
+  }
+  
+  return(h_out)
+
+}
+
+
+
+full_me_model
+```
+
+
+
+
+
+```{r}
+log_hazard_waitlist <- function(model, ctr_id, Age, d_time, diabetes, CAN_PREV_TX){
+  no_dial <- ifelse(d_time == 0, 1,0)
+  age_floor_25 <- ifelse(Age < 25, 0, Age - 25)
+  log_dial_time <- log(d_time + 1)
+  
+  user_patient_params <- c(age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX)
+  
+  names(user_patient_params) <- c("age_floor_25", "log_dial_time", "no_dial", "diabetes", "CAN_PREV_TX")
+  
+  fixed_effects <- fixef(model)
+  x_vars <- names(fixed_effects)
+  ref <- data.frame(ranef(model)[[1]])
+  ref$center <- row.names(ref)
+  int_ref <- filter(ref, center == ctr_id)$Intercept
+  
+  h_out <- int_ref
+  
+  for (x in names(user_patient_params)) {
+        value <- unname(user_patient_params[x])
+          add_hz <- value*(unname(fixed_effects[x]))
+      	  h_out <- h_out + add_hz
+  }
+  
+  return(h_out)
+
+}
+```
+
+
+```{r}
+log_hazard_w_tx(full_me_model, 782, 59, 2, 1, 0, 0)
+```
+```{r}
+log_hazard_waitlist(full_me_model, 782, 59, 2, 1, 0)
+```
+
+
+```{r hr_tx_ij}
+survival_benefit <-  function(model, t_transplant, ctr_id, Age, d_time, diabetes, CAN_PREV_TX, tx_kdri){
+  
+  
+  cum_hz <- filter(hz_list[[4]], time == t_transplant)$hazard
+  
+  hz_list[[4]] %>%
+  mutate(log_hr_tx = log_hazard_w_tx(full_me_model, ctr_id, Age, d_time, diabetes, CAN_PREV_TX, tx_kdri),
+         log_hr_wait = log_hazard_waitlist(full_me_model, ctr_id, Age, d_time, diabetes, CAN_PREV_TX),
+         hazard = hazard - cum_hz) %>%
+  filter(time >= t_transplant) %>%
+  mutate(
+         H_tx = hazard*exp(log_hr_tx),
+         H_wait = hazard*exp(log_hr_wait),
+         S_tx = exp(-H_tx),
+         S_wait = exp(-H_wait)) %>%
+  select(time, S_tx, S_wait) %>%
+  pivot_longer(-time, names_prefix = "S_", values_to = "Survival") %>%
+  mutate(name = ifelse(name == "tx", "transplant", "waitlist")) %>%
+  filter(time < t_transplant + 365*5) %>% 
+  ggplot(aes(x = time, y = Survival, color = name)) +
+  geom_step() + labs(color = "", x = "time (days since listing)") +
+    scale_x_continuous(breaks = seq(t_transplant, t_transplant + 365*5, 365)) +
+    lims(y = c(0,1))
+
+}
+
+survival_benefit(full_me_model,t_transplant = 500, 782, 59, 2, 1, 0, 0)
+```
+
+
+
+
+# To do 
+
+
+* Add ischemic time
+* replace KDPI with components (or at least fix pediatric portion)

@@ -1,0 +1,265 @@
+---
+title: "Prepare analytic dataset"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(haven)
+library(lubridate)
+```
+
+
+```{r}
+cand_kipa <- haven::read_sas("data/cand_kipa.sas7bdat")
+
+tx_ki <- haven::read_sas("data/tx_ki.sas7bdat")
+
+```
+
+
+
+# Cleaning notes
+
+
+* If a patient has multiple listings, the earliest time point is selected to start the time on risk. Duplicate listings are removed.
+
+* candidates who are delisted without transplant (`tx`) are followed until they die
+  * if no death for a delisted candidate is recorded, then the observation is censored at the time of delisting
+  
+* Post-transplant graft failure is currently ignored in this analysis. Patients are followed from time of kidney-alone transplantation forward until death.
+
+* Post-transplant follow-up for recipients is until death or last follow clinic follow-up
+```{r}
+start_year <- 2005 
+end_year <- 2010
+
+candidates <- cand_kipa %>%
+  select(PX_ID, PERS_ID, WL_ORG, CAN_LISTING_DT, center = CAN_LISTING_CTR_ID,
+         DON_TY,
+         CAN_AGE_AT_LISTING,
+         CAN_AGE_IN_MONTHS_AT_LISTING,
+         CAN_DIAB_TY,
+         CAN_DIAL,CAN_DIAL_DT,
+         CAN_PREV_TX,
+         CAN_REM_CD, CAN_REM_DT, CAN_DEATH_DT,
+         PERS_OPTN_DEATH_DT, PERS_RESTRICT_DEATH_DT, PERS_RESTRICT_DEATH_VRFY, PERS_SSA_DEATH_DT,
+         REC_TX_PROCEDURE_TY, REC_TX_DT) %>%
+  filter(year(CAN_LISTING_DT) >= start_year & 
+           year(CAN_LISTING_DT) <= end_year & WL_ORG == "KI" & DON_TY != "L")
+
+#save(candidates, file = "clean_candidate_data.R")
+
+first_observation <- candidates %>% 
+  group_by(PERS_ID, CAN_PREV_TX) %>%
+  mutate(earliest_list_date = min(CAN_LISTING_DT)) %>% 
+  arrange(PERS_ID, CAN_LISTING_DT) %>%
+  filter(!CAN_REM_CD %in% c(7,14)) 
+
+multiple_lists <- first_observation %>% 
+  ungroup() %>% 
+  count(PERS_ID, CAN_PREV_TX) %>%
+  filter(n>1) %>%
+  mutate(multiple_list = 1) 
+
+multiple_listings_ids <- multiple_lists$PERS_ID
+
+multiple_lists <- multiple_lists %>% 
+  left_join(first_observation) %>%
+  mutate(ddkt = ifelse(CAN_REM_CD == 4, 1, 0)) %>%
+  group_by(PERS_ID, CAN_PREV_TX) %>%
+  mutate(got_ddkt = sum(ddkt),
+         first_date = min(CAN_LISTING_DT),
+         selected_list = case_when(
+           got_ddkt ==1 & ddkt ==1 ~ 1,
+           
+           got_ddkt == 0 & CAN_LISTING_DT == first_date ~ 1,
+           TRUE ~ 0
+         )) %>%
+  ungroup() %>%
+  select(PX_ID, selected_list)
+
+first_observation <- first_observation %>% 
+  left_join(multiple_lists) %>% 
+  filter(is.na(selected_list)==TRUE| selected_list ==1) %>% 
+  select(-selected_list) %>% 
+  ungroup()
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+first_observation <- first_observation %>%
+  mutate(death_date = case_when(
+                          CAN_REM_CD == 8 ~ CAN_REM_DT,
+                          TRUE ~ pmin(PERS_OPTN_DEATH_DT,
+                           PERS_RESTRICT_DEATH_DT, PERS_SSA_DEATH_DT, na.rm = TRUE)),
+           t_1 = CAN_LISTING_DT - CAN_LISTING_DT,
+         t_2 = case_when(
+           CAN_REM_CD == 4 ~ CAN_REM_DT - CAN_LISTING_DT,
+           is.na(death_date) == FALSE ~ death_date- CAN_LISTING_DT,
+           TRUE ~ CAN_REM_DT - CAN_LISTING_DT),
+         dead = case_when(
+           CAN_REM_CD == 8 ~ 1,
+           CAN_REM_CD == 4 ~ 0,
+           is.na(death_date) == FALSE ~ 1,
+           TRUE ~ 0
+         ),
+         tx = 0,
+         age = CAN_AGE_AT_LISTING,
+         diabetes = ifelse(CAN_DIAB_TY %in% c(2,3,4,5), 1, 0),
+         dialysis_time_years =  (CAN_LISTING_DT - CAN_DIAL_DT)/365,
+         dialysis_time_years = ifelse(is.na(dialysis_time_years) | dialysis_time_years<0, 0, dialysis_time_years),
+         raw_epts = max(age- 25, 0)*(0.047 - 0.015*diabetes) +
+           CAN_PREV_TX*(0.398- 0.237*diabetes)+
+           log(dialysis_time_years + 1)*(0.315 - 0.099*diabetes) +
+           ifelse(dialysis_time_years ==0, 1, 0)*(0.130 - 0.348*diabetes) +  
+           1.262*diabetes
+         )
+
+first_observation
+```
+
+
+```{r}
+tx_details <- tx_ki %>% 
+  filter(PX_ID %in% candidates$PX_ID & CAN_REM_CD == 4) %>% 
+  select(PX_ID, PERS_ID, center = REC_CTR_ID, TFL_LASTATUS, TFL_LAFUDATE, REC_TX_DT,
+                             age = REC_AGE_AT_TX,REC_DIAL_DT, REC_DIAL_TY, CAN_DIAB_TY, CAN_PREV_TX, 
+                             DON_AGE, DON_RACE,
+                 DON_HGT_CM, DON_WGT_KG,
+                 DON_HIST_HYPERTEN,
+                 DON_HIST_DIAB,
+                DON_CAD_DON_COD,
+                 DON_COD_DON_STROKE,
+                 DON_CREAT, DON_KI_CREAT_PREOP, 
+                 DON_ANTI_HCV,
+                 DON_NON_HR_BEAT) %>%
+  mutate(donor_creat = ifelse(is.na(DON_CREAT), DON_KI_CREAT_PREOP, DON_CREAT),
+           tx_kdri = 
+           0.0128*(DON_AGE - 40) + ifelse(DON_AGE<18, -0.0194*(DON_AGE - 18), 0) + ifelse(DON_AGE>50, 0.0107*(DON_AGE - 50),0) +
+           (-0.0464*(DON_HGT_CM -170))/10  + ifelse(DON_WGT_KG< 80, -0.0199*(DON_WGT_KG - 80)/5, 0) +
+           ifelse(DON_RACE == 16, 0.1790, 0) + 
+           ifelse(DON_HIST_HYPERTEN %in% c(2,3,4,5), 0.1260, 0) + ifelse(DON_HIST_DIAB %in% c(2,3,4,5), 0.1300, 0) +
+           ifelse(DON_COD_DON_STROKE == 1 |  DON_CAD_DON_COD == 2, 0.0881, 0) +
+           0.2200*(donor_creat-1) + ifelse(donor_creat > 1.5, -0.2090*(donor_creat-1.5), 0) +
+           ifelse(DON_ANTI_HCV == "P", 0.2400, 0) +
+           ifelse(DON_NON_HR_BEAT == "Y", 0.1330, 0),
+         diabetes = ifelse(CAN_DIAB_TY %in% c(2,3,4,5), 1, 0),
+         dialysis_time_years =  (REC_TX_DT - REC_DIAL_DT)/365,
+         dialysis_time_years = ifelse(is.na(dialysis_time_years)| dialysis_time_years<0, 0, dialysis_time_years),
+         raw_epts = max(age- 25, 0)*(0.047 - 0.015*diabetes) +
+           CAN_PREV_TX*(0.398- 0.237*diabetes)+
+           log(dialysis_time_years + 1)*(0.315 - 0.099*diabetes) +
+           ifelse(dialysis_time_years ==0, 1, 0)*(0.130 - 0.348*diabetes) +  
+           1.262*diabetes
+         ) 
+```
+
+
+
+
+
+```{r}
+recipient_observation <- tx_details %>%
+  left_join(first_observation %>% select(PX_ID, death_date, CAN_LISTING_DT, t_2)) %>%
+  mutate(dead = case_when(
+    is.na(death_date) == FALSE ~  1, 
+    TFL_LASTATUS == "D" ~ 1,
+    TRUE ~ 0),
+        tx = 1,
+         t_1 = t_2,
+         t_2 = case_when(
+           is.na(death_date) == FALSE ~ death_date - CAN_LISTING_DT,
+           TRUE ~ TFL_LAFUDATE - CAN_LISTING_DT)
+        )
+
+
+analytic_data <- first_observation %>%
+  select(PERS_ID, PX_ID, center,t_1, t_2,tx,  dead, center,
+         age,
+         dialysis_time_years,
+         diabetes,
+         CAN_PREV_TX,
+         raw_epts) %>%
+  mutate(tx_kdri = 0) %>%
+  rbind(recipient_observation %>%
+  select(PERS_ID, PX_ID, center, t_1, t_2, tx,dead, tx_kdri, 
+         age,
+         dialysis_time_years,
+         diabetes,
+         CAN_PREV_TX,
+         raw_epts))%>%
+  arrange(PERS_ID, PX_ID, t_1) 
+
+mean_age <- mean(filter(analytic_data %>% group_by(PERS_ID), row_number()==1)$age)
+
+analytic_data <- analytic_data %>% 
+  mutate(mean_centered_age = age-mean_age,
+         age_floor_25 = ifelse(age <25, 0, age-25),
+         log_dial_time = log(dialysis_time_years + 1),
+         no_dial = ifelse(dialysis_time_years == 0, 1, 0)
+         )
+
+
+## for candidates no removal date from waitlist or death date, censor at either last active or inactive status date
+analytic_data <-  analytic_data %>%
+  left_join(cand_kipa %>% select(PX_ID,  CAN_LISTING_DT,  CAN_LAST_ACT_STAT_DT,CAN_LAST_INACT_STAT_DT)) %>%
+  left_join(tx_ki %>% select(PX_ID, REC_TX_DT, TFL_LAFUDATE)) %>% 
+  mutate(last_date_waitlist = case_when(
+    tx == 0 ~ pmax(CAN_LAST_ACT_STAT_DT, CAN_LAST_INACT_STAT_DT, na.rm = TRUE)),
+    t_1 = case_when(
+      tx ==1 & is.na(t_1) ~ as.numeric(REC_TX_DT - CAN_LISTING_DT),
+      TRUE ~ as.numeric(t_1)
+    ),
+    t_2 = case_when(
+      tx ==0 & is.na(t_2) ~ as.numeric(last_date_waitlist - CAN_LISTING_DT),
+      tx == 1 & is.na(t_2) ~ as.numeric(TFL_LAFUDATE - CAN_LISTING_DT),
+      TRUE ~ as.numeric(t_2)),
+    t_2 = case_when(
+      tx ==0 & t_1 == 0 & t_2 ==0 ~ 1,
+      tx == 1 & t_1 == t_2 ~ t_2 + 1,
+      TRUE ~ t_2
+    ),
+
+    ) 
+```
+
+```{r}
+analytic_data %>%
+  arrange(PERS_ID, PX_ID, t_1, t_2, tx, dead)
+```
+
+
+```{r}
+# miss_t2_can <- filter(analytic_data, is.na(t_2) & tx ==0)$PX_ID
+# 
+# 
+# first_observation %>%
+#   filter(PX_ID %in% miss_t2_can) %>%
+#   left_join(cand_kipa %>% select(PX_ID, CAN_INIT_ACT_STAT_DT, CAN_LAST_ACT_STAT_DT,CAN_LAST_INACT_STAT_DT, CAN_ACTIVATE_DT, CAN_DIAL_DT, CAN_DEATH_DT)) %>%
+#   select(PX_ID, t_1, t_2, CAN_LISTING_DT, CAN_INIT_ACT_STAT_DT,  CAN_LAST_ACT_STAT_DT,CAN_LAST_INACT_STAT_DT, CAN_ACTIVATE_DT,CAN_DIAL_DT, CAN_REM_CD, CAN_REM_DT, death_date, raw_epts)
+# 
+# miss_t2_recip <- filter(analytic_data, is.na(t_2) & tx ==1)$PX_ID
+# 
+# recipient_observation %>%
+#   filter(PX_ID %in% miss_t2_recip)
+```
+
+
+```{r}
+# bad_dates <- filter(analytic_data, t_2 == t_1)$PX_ID
+# 
+# analytic_data %>%
+#   filter(PX_ID %in% bad_dates) %>%
+#   arrange(PX_ID, t_1)%>%
+# select(PX_ID, t_1, t_2, tx, CAN_LISTING_DT, CAN_REM_CD, CAN_REM_DT, death_date)
+```
+
+
+
+
+```{r}
+write_csv(analytic_data, "clean_data.csv")
+```
+
