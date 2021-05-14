@@ -1,5 +1,5 @@
 ---
-title: "Calculating the Survival Benefit of Deceased Donor Kidney Transplantation"
+title: "Calculating the Lives Saved with Deceased Donor Kidney Transplantation"
 author: "William F Parker, MD, MS,^1^, Yolanda Becker MD^1^, Robert Gibbons, PhD^1^" 
 date: "^1^University of Chicago"
 thanks: "This is the preliminary working draft of a commissioned paper for the National Academies of Sciences, Engineering, and Medicine study committee: A Fairer and More Equitable Cost-Effective and Transparent System of Donor Organ Procurement, Allocation, and Distribution. It has not undergone peer review and will undergo substantial changes after feedback from the committee."
@@ -13,9 +13,10 @@ output:
     toc_float: yes
 bibliography: references.bib
 csl: national-academy-science-letters.csl
+urlcolor: blue
 ---
 
-```{r packages,  warning= FALSE, message= FALSE, cache = FALSE}
+```{r packages, include = FALSE, cache = FALSE, echo = FALSE}
 library(survival)
 library(coxme)
 library(tidyverse)
@@ -242,19 +243,21 @@ Deceased donor organs are the definitive treatment for terminal organ failure, h
 
 Deceased donor organs are absolutely scarce. This means that thousands of patients fortunate enough to get listed will die on the waiting list every year [@national], and countless others who would benefit from a transplant will not even be considered. While efforts to expand the donor pool and encourage transplantation of marginal donors are critical to minimize the shortage, the fact remains that demand for organ transplantation will exceed supply in the US for the foreseeable future. Policymakers at the Organ Procurement and Transplant Network (OPTN) are faced with a tragic choice; they must rank order human beings for a life-saving, medically necessary therapy.
 
-The Department of Health and Human Services' Final Rule directs the OPTN to design organ allocation policies "to achieve the best use of donated organs" [@e-cfr:t]. Specifically, candidates must be ranked from "most to least medically urgent" while "taking into account... that life sustaining technology allows alternative approaches." The survival benefit from transplant, each individual candidates' improvement in survival from organ transplantation, represents a direct quantification of the efficiency principles in the Final Rule, statistically quantifying the "lives saved" from each transplant. While typically applied to liver, heart, and lung transplantation,[@krakauer2005**;** @merion2005; @singh2014; @parker2019] kidney transplantation also dramatically improves recipient survival compared to remaining on dialysis [@wolfe1999; @schnitzler2005; @orandi2016]. Despite the life-saving potential of deceased donor kidney transplantation, U.S. transplant programs discarded 1 in 5 kidneys recovered in 2019 for transplantation [@hart2021]. While centers have been more likely to accept hepatitis C-positive donors over time, donors sorted into a lower allocation sequence by the Kidney Donor Profile Index (KDPI) score have a substantially higher probability of discard. Less than 5% of sequence A and B kidneys (KDPI \< 35%) were discarded compared to 20% of sequence C kidneys (KDPI 35-85%) and 60% of sequence D kidneys (KDPI\> 85%) [@hart2021]. It has been repeatedly shown that accepting a "lower quality" kidney, measured by either Extended Donor Criteria or Kidney Donor Profile Index (KDPI) over 70%, leads to a significant survival benefit at 5-years post-transplant compared to waiting for a better organ for the vast majority of patients [@merion2005a; @massie2014]. Similarly, graft survival at three-years is higher with accepting a high KDPI now rather than waiting for a better graft, unless the candidate is very high priority in high local donor supply environment [@wey2018]. The high discard rate reduces both the total lives saved by the system and outcomes for individual patients.
+The Department of Health and Human Services' Final Rule directs the OPTN to design organ allocation policies "to achieve the best use of donated organs" [@e-cfr:t]. Specifically, candidates must be ranked from "most to least medically urgent" while "taking into account... that life sustaining technology allows alternative approaches." The survival benefit from transplant, each individual candidates' improvement in survival from organ transplantation, represents a direct quantification of the efficiency principles in the Final Rule, statistically quantifying the "lives saved" from each transplant. While typically applied to liver, heart, and lung transplantation,[@krakauer2005**;** @merion2005; @singh2014; @parker2019] kidney transplantation also dramatically improves recipient survival compared to remaining on dialysis [@wolfe1999; @schnitzler2005; @orandi2016]. Despite the life-saving potential of deceased donor kidney transplantation, U.S. transplant programs discarded 1 in 5 kidneys recovered in 2019 for transplantation [@hart2021]. While centers have been more likely to accept hepatitis C-positive donors over time, donors sorted into a lower allocation sequence by the Kidney Donor Profile Index (KDPI) score have a substantially higher probability of discard. Less than 5% of sequence A and B kidneys (KDPI \< 35%) were discarded compared to 20% of sequence C kidneys (KDPI 35-85%) and 60% of sequence D kidneys (KDPI\> 85%) [@hart2021]. It has been repeatedly shown that accepting a "lower quality" kidney- indicated by either Extended Donor Criteria, increased risk for disease transmission (IRD), or Kidney Donor Profile Index (KDPI) over 70%- leads to a significant survival benefit at 5-years post-transplant compared to waiting for a better organ for the vast majority of patients [@merion2005a; @massie2014; @bowring2018]. Similarly, graft survival at three-years is higher with accepting a high KDPI now rather than waiting for a better graft, unless the candidate is very high priority in high local donor supply environment [@wey2018]. The high discard rate reduces both the total lives saved by the system and outcomes for individual patients.
 
 Part of the low acceptance rates of higher KDPI kidneys may be that patients and transplant physicians have an incomplete representation of the survival benefit of kidney transplantation relative to remaining on the waitlist. We aimed to produce a survival benefit model of deceased donor kidney transplantation (DDKT) that improves upon the existing literature by
 
 1.  Estimating the **lives saved** with each transplant over a defined time interval (5 years) instead of preforming longer-term extrapolations to calculate the total Life-Years From Transplant (LFYT) [@wolfe2008]. We argue that the lives saved per transplant can be more reliably estimated with the available data and is more in line with the ethical principles of the Final Rule than LFYT, which calculates the number of life-years saved with each transplant.
 2.  Use modern survival analysis methodology to account for center effects, time-dependent covariates, and interactions between candidate and donor variables.
-3.  Develop an accessible end-application for shared decision making between transplant programs and patients when considering deceased donor kidney offers that presents more information than KDPI alone.
+3.  Develop an accessible end-application for shared decision making between transplant programs and patients to compare deceased donor kidney offers that presents more information than KDPI alone.
+
+\pagebreak
 
 # Data Source and Study Population
 
 This study was a secondary analysis of de-identified, pre-collected data and was granted exemption status by the University of Chicago Biological Sciences Division/University of Chicago Medical Center IRB to be performed without patient consent. This study used data from the [SRTR (Scientific Registry of Transplant Recipients)](https://www.srtr.org/about-the-data/the-srtr-database/). The SRTR data system includes data on all donors, wait-listed candidates, and transplant recipients in the United States, submitted by the members of the OPTN. The Health Resources and Services Administration, U.S. Department of Health and Human Services provides oversight to the activities of the OPTN and SRTR contractors.
 
-We extracted records on all adult ($\geq 18$ years of age at listing), kidney-alone candidates listed between January 1st, 2005 and December 31st, 2010 (N = `r to_model %>% filter(tx ==0) %>% nrow() %>% comma()`). We extracted the candidate covariates included in the Estimated Post-Transplant Survival Model (EPTS) [@eptscal]: age, dialysis time, diabetic status, and history of previous organ transplant (**Table 1A**). We included one initial observation per candidate, defining the beginning of the waitlist period as the date of the first registration for candidates with multiple registrations. The observation time interval spans from the date of initial listing until transplant, death (including deaths after delisting), or last time observed on the waitlist (for untransplanted candidates who do not have a recorded death date). The SRTR dataset includes monthly updates from the National Technical Information Service's (NTIS) [**Death Master File**](https://dmf.ntis.gov/)to capture deaths after delisting that are not recorded by transplant programs.
+We extracted records on all adult ($\geq 18$ years of age at listing), kidney-alone candidates listed between January 1st, 2005 and December 31st, 2010 (N = `r to_model %>% filter(tx ==0) %>% nrow() %>% comma()`). We extracted the candidate covariates included in the Estimated Post-Transplant Survival Model (EPTS) [@eptscal]: age, dialysis time, diabetic status, and history of previous organ transplant (**Table 1A**). We included one initial observation per candidate, defining the beginning of the waitlist period as the date of the first registration for candidates with multiple registrations. The observation time interval spans from the date of initial listing until transplant, death (including deaths after delisting), or last time observed on the waitlist (for untransplanted candidates who do not have a recorded death date). The SRTR dataset includes monthly updates from the National Technical Information Service's (NTIS) [**Death Master File**](https://dmf.ntis.gov/) to capture deaths after delisting that are not recorded by transplant programs.
 
 For the N = `r recips %>% nrow()`candidates that survived and received a deceased donor kidney transplant, we created a second observation with their updated candidate covariates, donor KDRI, and cold ischemic time (**Table 1B**). This observation begins at the time of transplant and ends at death or the date of last-followup. The timing of post-transplant graft failure does not directly influence the model.
 
@@ -280,9 +283,9 @@ tbl_summary(to_model %>%
 
 ```{r recip_table, results = 'asis'}
 tbl_summary(recips %>%
-              mutate("Post-transplant follow-up time" = t_2 - t_1)%>% 
+              mutate("Post-transplant follow-up time (years)" = (t_2 - t_1)/365)%>% 
               select("Age" = age,
-                     "Time on waitlist pre-transplant" = t_1,
+                     "Time on waitlist pre-transplant (days)" = t_1,
                      "Dialysis time (years)" = dialysis_time_years,
                      "History of diabetes" = diabetes,
                      "History of previous organ transplant" = CAN_PREV_TX,
@@ -291,7 +294,7 @@ tbl_summary(recips %>%
                      "Waiting time pre-transplant" = t_1,
                      "KDPI % (2019 mapping table)" = kdpi,
                      "Ischemic time (hours)" = ischemic_time,
-                     "Post-transplant follow-up time",
+                     "Post-transplant follow-up time (years)",
                      "Observed post-transplant deaths" = dead
             )
 ) %>% as_gt()
@@ -379,34 +382,104 @@ this model includes:
     -   $\gamma$: ischemic time
     -   $\alpha$: candidate and donor interactions $W_j * X_{ik}(t)$
 
-\pagebreak
-
 ## Model results
 
-We estimated our model with maximum likelihood estimation using the `coxme` package in `R` [@therneau2018_coxme]. The results are below with the coefficients represented on the log hazard scale. Transplantation is associated with a large negative hazard (better survival). While many of the interaction terms are very small in magnitude and not statistically significant, we chose to retain for all EPTS candidate covariates:donor interactions to control for selection behaviors by transplant physicians.
+We estimated our model with maximum likelihood estimation using the `coxme` package in `R` [@therneau2018_coxme]. The results are below with the coefficients represented on the log hazard scale. Transplantation is associated with a large negative hazard (better survival) and there are significant interaction effects with candidate age, dialysis time, and history of diabetes. While many of the interaction terms between the candidate covariates and KDRI are small in magnitude and not statistically significant, we chose to retain them to control for selection behaviors by transplant physicians and because of known significant interactions between KDPI and EPTS [@bae2019a] .
 
-## Table 3: Mixed-effects cox proportional hazards model results
+```{r include=FALSE}
+no_miss <- to_model %>% 
+  select(PX_ID, center, t_1, t_2,dead, age_floor_25, log_dial_time, no_dial, CAN_PREV_TX, tx, shifted_tx_kdri, i_time_low, i_time_high, i_time_unknown) %>%
+  na.omit()
+
+missing <- to_model %>% 
+    select(PX_ID, center, t_1, t_2,dead, age_floor_25, log_dial_time, no_dial, CAN_PREV_TX, tx, shifted_tx_kdri, i_time_low, i_time_high, i_time_unknown) %>%
+  anti_join(no_miss)
+
+missing_value_N <- colSums(is.na(to_model %>% select(center, t_1, t_2,dead, age_floor_25, log_dial_time, no_dial, CAN_PREV_TX, tx, shifted_tx_kdri, i_time_low, i_time_high, i_time_unknown)))
+```
+
+## Mixed-effects cox proportional hazards model results
+
+### Table 3A: Fixed Effect Coefficients
 
 ```{r summarise_main_model}
+coefs <- full_me_model$coefficients
+
+w_break <- c(coefs, "")
+
+names(w_break) <- c(names(coefs), "Transplant and interaction terms")
+
+id  <- c( seq_along(coefs), 5+0.5 )
+w_break <- w_break[order(id)]
+
+w_break_se <- c(vcov(full_me_model) %>% diag() %>% sqrt(), "")
+
+w_break_se <- w_break_se[order(id)]
+
+tibble(variable = names(w_break),
+       coef = w_break,
+       se = w_break_se) %>%
+  mutate(coef = as.numeric(w_break),
+         se = as.numeric(se),
+         up_ci = round(coef + 1.96*se, digits = 3),
+         low_ci = round(coef - 1.96*se,digits = 3),
+         coef = round(coef, digits =3),
+         ci = paste0("(", low_ci, ",", up_ci, ")"),
+       variable = case_when(
+    variable == "age_floor_25" ~ "Max(age -25, 0)",
+    variable == "log_dial_time" ~ "log(years on dialysis + 1)",
+    variable == "no_dial" ~ "Never dialyzed (pre-emeptive listing)",
+    variable == "diabetes" ~ "Diabetes",
+    variable == "CAN_PREV_TX" ~ "History of previous solid organ transplant",
+    variable == "tx" ~ "Transplantation",
+    variable == "shifted_tx_kdri" ~ "KDRI linear component score",
+    variable == "i_time_low" ~ "ischemic time < 12 hours",
+    variable == "i_time_high" ~ "ischemic time > 22 hours",
+    variable == "i_time_unknown" ~ "ischemic time not recorded",
+    variable == "age_floor_25:tx" ~ "transplantation:Max(age -25, 0):",
+    variable == "log_dial_time:tx" ~ "transplantation:log(years on dialysis + 1)",
+    variable == "no_dial:tx" ~ "transplantation:Never dialyzed (pre-emeptive listing)",
+    variable == "diabetes:tx" ~ "transplantation:Diabetes",
+    variable == "CAN_PREV_TX:tx" ~ "transplantation:History of previous solid organ transplant",
+    variable == "age_floor_25:shifted_tx_kdri" ~ "KDRI linear score:Max(age-25,0)",
+    variable == "log_dial_time:shifted_tx_kdri" ~ "KDRI linear score:log(years on dialysis + 1)",
+    variable == "no_dial:shifted_tx_kdri" ~ "KDRI linear score:Never dialyzed (pre-emeptive listing)",
+    variable == "diabetes:shifted_tx_kdri" ~"KDRI linear score:Diabetes",
+    variable == "CAN_PREV_TX:shifted_tx_kdri" ~ "KDRI linear score:CAN_PREV_TX",
+    variable == "shifted_tx_kdri:i_time_low" ~ "KDRI linear score:ischemic time < 12 hours",
+    variable == "shifted_tx_kdri:i_time_high" ~ "KDRI linear score:ischemic time > 22 hours",
+    variable == "shifted_tx_kdri:i_time_unknown" ~ "KDRI linear score:ischemic time not recorded",
+    TRUE ~ variable
+  )) %>%
+  select(Variable = variable, Coefficent = coef, "95% CI" = ci) %>%
+  mutate_all(function(x) ifelse(is.na(x) == TRUE, "---", x)) %>%
+  mutate(`95% CI` = ifelse(`95% CI` == "(NA,NA)", "---", `95% CI`)) %>%
+  kable(digits = 2)
+```
+
+
+
+```{r}
 summary(full_me_model)
+intercept_Var <- VarCorr(full_me_model)$center[1,1]
+transplant_Var <-VarCorr(full_me_model)$center[2,2]
+correlation <- VarCorr(full_me_model)$center[1,2]
+
+# tibble(name = c("Intercept (Waitlist) variance", "Transplant Effect", "Correlation"),
+#        values = c(VarCorr(full_me_model)$center[1,1], VarCorr(full_me_model)$center[2,2], VarCorr(full_me_model)$center[1,2]))
 ```
+### Table 3B:  Center-level random effects
+| Term                                    | Value                                   |
+|-----------------------------------------|-----------------------------------------|
+| Variance of waitlist risk ($\nu_0$ )    | `r intercept_Var %>% round(digits =2)`  |
+| Variance of transplant effect ($\nu_1$) | `r transplant_Var %>% round(digits =2)` |
+| Correlation ($Corr(\nu_0, \nu_1)$ )      | `r correlation %>% round(digits =2)`    |
 
-This fit is from all N = `r to_model %>% filter(tx ==0) %>% nrow() %>% comma()` adult candidates listed for kidney alone deceased donor transplant from 2005 to 2010.
-
-### Transplant center effects (log hazard scale)
-
-```{r re_effect_centers}
-ranef(full_me_model)$center %>% 
-  as_tibble() %>% 
-  cbind(center = rownames(ranef(full_me_model)$center)) %>% 
-  select(center, Intercept, tx) %>%
-  head() %>%
-  kable(col.names = c("Center", "Waitlist intercept", "Transplant Effect"), digits = 2)
-```
+This fit is from N = `rmodel_sum$n[2] %>% comma()` adult candidates listed for kidney alone deceased donor transplant from 2005 to 2010, there were N = `r comma(model_sum$n[1])`. `r nrow(missing) %>% comma()` observations were excluded for missing data, `r missing_value_N['shifted_tx_kdri']` for missing KDRI components and `r missing_value_N['center']` for missing center code. The negative log likelihood was `r full_me_model$loglik['Integrated']`.
 
 ### Standard deviation of 5-year survival benefit between centers on log hazard scale
 
-The between-center variance in survival benefit of transplant on the log hazard scale ( $B_i = \nu_{1i} - \nu_{0i}$ )is the variance of the difference between the two center effects, or
+The between-center variance in survival benefit of transplant on the log hazard scale ($B_i = \nu_{1i} - \nu_{0i}$) is the variance of the difference between the two center effects, or
 
 $Var(\nu_{i1} - \nu_{i0}) = Var(v_{1i}) + Var(\nu_{0i}) - 2*Corr(v_{1i}, v_{0i})*\sigma_{v_{0i}}\sigma_{v_{1i}}$
 
@@ -426,6 +499,22 @@ variance_survival_benefit <- function(me_cox){
 
 So for the model estimated here, the between-center standard deviation of the survival benefit on the log hazard scale is `r variance_survival_benefit(full_me_model) %>% sqrt() %>% round(digits = 2)`
 
+
+### Center-level effect on survival benefit
+```{r re_effect_centers}
+ranef(full_me_model)$center %>% 
+  as_tibble() %>% 
+  cbind(center = rownames(ranef(full_me_model)$center)) %>% 
+  select(center, Intercept, tx) %>%
+  arrange(Intercept) %>%
+  ggplot(aes(x = Intercept, y = tx)) +
+  geom_point() + labs(x = "Intercept (waitlist risk)", y = "transplant effect")
+```
+
+Plot of empirical bayes estimates of each center waitlist and transplant effect on the log hazard scale. Values are relative to the mean center (0,0). There is a significant positive correlation between the risk of death on the waitlist and the effect of transplant.
+
+
+
 ## Estimating survival benefit of DDKT
 
 While a hazard ratio of transplantation for each specific candidate-donor pair can be calculated directly from the coefficients in **Table 3**, more work is required to calculate the improvement in absolute survival with DDKT. Following the previously published methodology of @parker2019, we construct estimates of survival with transplant $S(t|transplant)_{ijk}$ and survival without transplant $S(t|waitlist)_{ijk}$ from the estimated model coefficients and a non-parametric estimate of the baseline hazard function $\hat{h}_{0}(t)$ .
@@ -444,7 +533,7 @@ Specifically, assume candidate $X_{ik}$ has waited $t_{tx}$ days and receives an
 
     -   **without transplant**: $$\hat{S}(t|wait)_{ik} = exp(-\int_{t_{tx}}^t \hat{h}_{ik}(t|wait)) dt$$
 
-Noting that the **baseline survival function** is $\hat{S}_0(t) = exp(-\int_0^t \hat{h}_0(u)du)$, we can re-write these counterfactual estimates as.
+Noting that the **baseline survival function** is $\hat{S}_0(t) = exp(-\int_0^t \hat{h}_0(u)du)$, we can re-write these counterfactual estimates as
 
 -   **with transplant:**
 
@@ -980,13 +1069,13 @@ days_gained_median <- survival_benefit_no_re(t_transplant = median_t_transplant,
                       median_kdpi, output = "rmst")
 ```
 
-The hazard ratio of transplantation with KDPI `r median_kdpi`% Kidney for this median patient is `r round(HR_transplant_median, digits = 2)`. The absolute benefit of DDKT increases over time since transplantation, growing each year. Calculating the lives "saved" from DDKT requires a time point to assess survival. For example, the +30% survival benefit at 5-year means that for every 10 "median" DDKT performed will lead to 3 more patients alive at 5-years. Alternatively, the number needed to transplant to save one life (within 5 years) is 3.3.
+The hazard ratio of transplantation with KDPI `r median_kdpi`% for this median patient is `r round(HR_transplant_median, digits = 2)`, indicating a `r 100*(1-round(HR_transplant_median, digits = 2))`% relative increase in survival with transplantation. The absolute benefit of DDKT increases over time after transplantation, growing each year. Calculating the lives "saved" from DDKT requires a time point to assess survival. For example, the +30% survival benefit at 5-year means that for every 10 "median" DDKT performed will lead to 3 more patients alive at 5-years. Alternatively, the number needed to transplant to save one life (within 5 years) is 3.3.
 
 Calculating the area under a survival function generates a difference in restricted mean survival time [@Royston2013], a metric utilized in the lung allocation score [@egan2006]. The blue shaded area between the two survival functions is an alternative survival benefit metric. In this example, `r days_gained_median`.
 
 ### KDPI effect on survival benefit
 
-Holding the characteristics of the "median" recipient constant (`r median_age` years old, listed and transplanted at the average center, on dialysis for `r median_d_time` years, `r median_t_transplant` days of waiting), we now calculate the survival benefit of DDKT ranging the KDPI from 1% to 99% (with `r round(median_ischemic_time)` hours of ischemic time)
+Here we present the effect of ranging the KDPI from 15% to 80% on the survival benefit of DDKT, holding the characteristics of the "median" recipient constant (`r median_age` years old, listed and transplanted at the average center, on dialysis for `r median_d_time` years, `r median_t_transplant` days of waiting),  (with `r round(median_ischemic_time)` hours of ischemic time). 
 
 #### Median Recipient with KDPI 15% kidney
 
@@ -1052,7 +1141,11 @@ Despite a lower estimated post-transplant survival, the older patient gets a muc
 
 The older recipient gets a higher absolute benefit from lower KDPI kidneys. So while preferentially allocating top 20% KDPI kidneys to top 20% EPTS candidates may lead to higher graft survival, it will save fewer lives at 5-years than directing top 20% kidneys to the candidates at higher risk of death on the waitlist. The latter is arguably more consistent with the Final Rule's directive to allocate organs to the "most urgent" candidates.
 
-# Exploring interactions between candidate and donor characteristics
+We encourage the reader to explore our [web application](https://wparker-uchicago.shinyapps.io/DDKT_survival_benefit/)) to appreciate the full non-linear complexity of calculating the survival benefit of DDKT.
+
+\pagebreak
+
+## Summaring the interactions between candidate and donor characteristics
 
 ```{r functions_w_kdri_input}
 log_hazard_w_tx_no_re_kdri <- function(Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, tx_kdri, icuts = i_time_cuts, model= full_me_model, ...){
@@ -1189,7 +1282,7 @@ survival_benefit_at_time_no_re <-  function(t_transplant, Age, d_time, diabetes,
 #   cbind(benefit_5yr = unlist(recipient_5yr_survival_benefit))
 ```
 
-## 5-year survival benefit by KDPI, Age, and Diabetic Status
+### 5-year survival benefit by KDPI, Age, and Diabetic Status
 
 ```{r survival_benefit_at_time_kdpi}
 survival_benefit_at_time_no_re_kdpi <-  function(t_transplant, Age, d_time, diabetes, CAN_PREV_TX, 
@@ -1291,7 +1384,7 @@ benefit_by_kdpi %>%
 
 5-year improvement in survival following deceased donor kidney transplantation after `r median_t_transplant` days of waiting and `r round(median_d_time, digits =1)` years of dialysis with `r round(median_ischemic_time)` hours of ischemic time. In general, older recipients have greater survival benefit than younger recipients (except for patients with diabetes with KDPI \>75%).
 
-## 5-year survival benefit by dialysis time, age, diabetic status, and KDPI
+### 5-year survival benefit by dialysis time, age, diabetic status, and KDPI
 
 ```{r}
 benefit_by_dtime_kdpi <- sb5_by_kdpi(median_t_transplant, 30, 0, 0, 0, median_ischemic_time) %>%
@@ -1334,7 +1427,11 @@ Improvement in survival at 5-years from DDKT after `r median_t_transplant` days 
 
 Candidates with more dialysis time at transplant have greater survival benefit, mediated by poor survival on the waitlist. The effect is non-linear (modeled as $log(years \, on \, dialysis + 1)$, consistent with the EPTS model).
 
-# Implications for Estimated-Post Transplant Survival based allocation
+\pagebreak
+
+# Discussion
+
+## Implications for Estimated-Post Transplant Survival based allocation
 
 Under the current Kidney Allocation System (KAS), candidates in the top 20% of estimated post-transplant survival (EPTS) receive higher priority for Sequence A kidneys (KDPI 0-20%). The main goal of this component of the allocation system is to improve graft survival of the highest quality kidneys.
 
@@ -1414,7 +1511,7 @@ recips_test <- recips_test %>%
 EPTS <- future_map_dbl(recips_test$raw_epts, EPTS_mapper)
 ```
 
-## Figure: 5-year survival benefit by EPTS percentile
+### Figure: 5-year survival benefit by EPTS percentile
 
 ```{r plot_EPTS_vs_survival_benefit}
 recips_test %>%
@@ -1432,9 +1529,11 @@ recips_test %>%
   labs(x = "EPTS % (2019)", y = "Survival Benefit (5-year)", color = "EPTS group")
 ```
 
-Mean 5-year survival benefit for the the N=`recips %>% nrow() %>% comma()` transplant recipients in the study cohort by EPTS % (2019 mapping table). The survival benefit of transplant increases as estimated post-transplant survival decreases because the waitlist survival of candidates in the higher EPTS % is much lower than the top 20% EPTS candidates.
+Mean 5-year survival benefit for the the N=`r recips %>% nrow() %>% comma()` transplant recipients in the study cohort by EPTS % (2019 mapping table). The survival benefit of transplant increases as estimated post-transplant survival decreases because the waitlist survival of candidates in the higher EPTS % is much lower than the top 20% EPTS candidates.
 
-## Table: 5-year survival benefit by EPTS quintile
+This finding is consistent with the work of @bae2019- candidates at higher risk of death on the waitlist have greater survival benefit at 5 years.
+
+### Table: 5-year survival benefit by EPTS quintile
 
 ```{r}
 recips_test %>% 
@@ -1449,10 +1548,11 @@ recips_test %>%
 
 Top 20% EPTS candidates have the lowest predicted 5-year survival benefit. So while allocating the highest quality kidneys to this group may improve graft longevity in transplant recipients, arguably *this component* of KAS will decrease the number of lives saved by the system.
 
-# Waiting for a better kidney
+\pagebreak
 
-```{r waiting_better}
-```
+## Waiting for a better kidney
+
+### Formal description
 
 The comparison counter-factual thus far in the analysis has been remaining on the waitlist *without* transplantation. However, turning down a particular kidney does not may give a candidate the ability to accept a subsequent offer for a better graft (assuming they survive to receive the next offer).
 
@@ -1460,13 +1560,258 @@ Our model can construct counterfactuals for this decision.
 
 1.  Accept kidney $W_{j}$ after $t_a$ time on the waitlist. This is the same as the standard post-transplant survival function generated by our model
 
-$$\hat{S}(t|accept \, W_j)_{ijk} = exp(-\int_{t_{a}}^t \hat{h}_{ijk}(transplant \, W_{j})) dt$$
+$$\hat{S}(t|accept \, W_j)_{ijk} = exp(-\int_{t_{a}}^t \hat{h}_{ijk}(t|transplant \, W_{j})) dt$$
 
-2.  Reject kidney $W_{j}$ and wait until time $t_b = t_a + \Delta t$ to get a better kidney $W_{m}$. This patient experiences a discontinuity in hazard, starting off at higher risk during the waiting period- $\hat{h(wait)}$ for time $(t_a, t_b)$- and then improving to lower risk after accepting the better kidney $W_m$ ($\hat{h}(transplant \, W_m)$ for all time after $t_b$)
+2.  Reject kidney $W_{j}$ and wait until time $t_b = t_a + \Delta t$ to get a better kidney $W_{m}$. This patient experiences a discontinuity in hazard, starting off at higher risk during the waiting period- $\hat{h}(wait)$ for time $(t_a, t_b)$- and then improving to lower risk after accepting the better kidney $W_m$ ($\hat{h}(transplant \, W_m)$ for all time after $t_b$)
 
-$$\hat{S}(t|wait \,for \, W_m)_{ijk} = exp(-(\int_{t_{a}}^{t_b} \hat{h}_{ijk}(wait)dt + \int_{t_b}^t\hat{h}_{ijk}(transplant \, W_{m})dt))$$
+$$\hat{S}(t|wait \,for \, W_m)_{ijk} = exp(-(\int_{t_{a}}^{t_b} \hat{h}_{ijk}(t|wait)dt + \int_{t_b}^t\hat{h}_{ijk}(t|transplant \, W_{m})dt))$$
 
-\pagebreak
+## Web application: Take the offer or wait for better?
+
+The decision to take a kidney offer now or wait for a better one depends on all the key variables above. We have developed an online webtool to assist physicians and patients in shared-decision making.
+
+<https://wparker-uchicago.shinyapps.io/DDKT_survival_benefit_compare/>
+
+### Example output
+
+```{r waiting_vs_transplant}
+wait_for_better <- function(t_a, kdpi_a, i_time_a,
+                            t_b, kdpi_b, i_time_b,
+                            Age, d_time, diabetes, CAN_PREV_TX, ctr_id = "mean center", 
+                            output = "plot",  me_model = full_me_model, 
+                            isch_cuts = i_time_cuts, b_hazard = full_base_hz){
+    
+    cum_hz <- filter(b_hazard, time == t_a)$hazard
+    
+    df <- b_hazard
+    
+    d_time_b <- d_time + (t_b - t_a)/365
+    #print(d_time_b)
+    Age_b <- Age + (t_b - t_a)/365
+    #print(Age_b)
+    
+    if (ctr_id == "mean center"){
+        df <- df %>% 
+            filter(time >= t_a) %>%
+            mutate(hazard = hazard- lag(hazard),
+                   hazard = ifelse(is.na(hazard), 0, hazard)) %>% 
+            mutate(log_hr_a = log_hazard_w_tx_no_re(Age, d_time, diabetes,CAN_PREV_TX,
+                                                    i_time_a, kdpi_a, 
+                                                    model = me_model, icuts = isch_cuts),
+                   
+                   log_hr_wait = log_hazard_waitlist_no_re( 
+                       Age, d_time, diabetes, CAN_PREV_TX, 
+                       model = me_model),
+                   log_hr_tx_b = log_hazard_w_tx_no_re(Age_b, d_time_b, diabetes,CAN_PREV_TX,
+                                                       i_time_b, kdpi_b, 
+                                                       model = me_model, icuts = isch_cuts),
+                   log_hr_b = ifelse(time >= t_b, log_hr_tx_b, log_hr_wait),
+                   h_a = hazard*exp(log_hr_a),
+                   h_b = hazard*exp(log_hr_b),
+                   h_wait = hazard*exp(log_hr_wait),
+                   H_a = cumsum(h_a),
+                   H_b = cumsum(h_b),
+                   H_wait = cumsum(h_wait),
+                   S_a = exp(-H_a),
+                   S_b = exp(-H_b),
+                   S_wait = exp(-H_wait),
+                   years_from_first_offer = (time - t_a)/365,
+                   kidney_a = case_when(years_from_first_offer == 0 ~ S_a),
+                   kidney_b = case_when(time == t_b ~ S_b),
+                   transplant = case_when(
+                       #years_from_first_offer == 0 ~ "First Offer",
+                       time == t_b ~ "Receive Kidney B"
+                   ),
+                   transplant_surv = case_when(
+                       #years_from_first_offer == 0 ~ S_a,
+                       time == t_b ~ S_b
+                   ),
+                   s_a_better = ifelse(S_a >= S_b, S_a, NA),
+                   s_a_worse = ifelse(S_b >= S_a, S_a, NA),
+                   s_b_better = ifelse(S_b >= S_a, S_b, NA),
+                   s_b_worse = ifelse(S_a >= S_b, S_b, NA)
+            ) %>%
+            filter(time < t_b + 365*5)
+    } else {df <- df %>% 
+        filter(time >= t_a) %>%
+        mutate(hazard = hazard- lag(hazard),
+               hazard = ifelse(is.na(hazard), 0, hazard)) %>% 
+        mutate(log_hr_a = log_hazard_w_tx(ctr_id, Age, d_time, diabetes,CAN_PREV_TX,
+                                          i_time_a, kdpi_a, 
+                                          model = me_model, icuts = isch_cuts),
+               
+               log_hr_wait = log_hazard_waitlist(ctr_id, 
+                                                 Age, d_time, diabetes, CAN_PREV_TX, 
+                                                 model = me_model),
+               log_hr_tx_b = log_hazard_w_tx(ctr_id, Age_b, d_time_b, diabetes,CAN_PREV_TX,
+                                             i_time_b, kdpi_b, 
+                                             model = me_model, icuts = isch_cuts),
+               log_hr_b = ifelse(time >= t_b, log_hr_tx_b, log_hr_wait),
+               h_a = hazard*exp(log_hr_a),
+               h_b = hazard*exp(log_hr_b),
+               h_wait = hazard*exp(log_hr_wait),
+               H_a = cumsum(h_a),
+               H_b = cumsum(h_b),
+               H_wait = cumsum(h_wait),
+               S_a = exp(-H_a),
+               S_b = exp(-H_b),
+               S_wait = exp(-H_wait),
+               years_from_first_offer = (time - t_a)/365,
+               kidney_a = case_when(years_from_first_offer == 0 ~ S_a),
+               kidney_b = case_when(time == t_b ~ S_b),
+               transplant = case_when(
+                   #years_from_first_offer == 0 ~ "First Offer",
+                   time == t_b ~ "Receive Kidney B"
+               ),
+               transplant_surv = case_when(
+                   #years_from_first_offer == 0 ~ S_a,
+                   time == t_b ~ S_b
+               ),
+               s_a_better = ifelse(S_a >= S_b, S_a, NA),
+               s_a_worse = ifelse(S_b >= S_a, S_a, NA),
+               s_b_better = ifelse(S_b >= S_a, S_b, NA),
+               s_b_worse = ifelse(S_a >= S_b, S_b, NA)
+        ) %>%
+        filter(time < t_b + 365*5)
+    }
+    
+    if (min(df$S_a) > max(df$S_b)){
+        p <- df %>% 
+            ggplot(aes(x =years_from_first_offer)) +
+            geom_ribbon(aes(ymax = s_a_better, ymin = s_b_worse, fill = "Survival benefit of A over B"), alpha = 0.75) 
+        #geom_ribbon(aes(ymax = s_b_better, ymin = s_a_worse, fill = "Survival benefit of B over A"), alpha = 0.75)
+        
+    } else {
+        p <- df %>% 
+            ggplot(aes(x =years_from_first_offer)) +
+            geom_ribbon(aes(ymax = s_a_better, ymin = s_b_worse, fill = "Survival benefit of A over B"), alpha = 0.75) +
+            geom_ribbon(aes(ymax = s_b_better, ymin = s_a_worse, fill = "Survival benefit of B over A"), alpha = 0.75)
+    }
+    
+    
+    p <- p +            
+        lims(y = c(0, 1)) +
+        ggthemes::theme_gdocs() +
+        scale_x_continuous(breaks = seq(0,10, 1)) + 
+        scale_color_manual(values = c("darkgreen", "blue", "red")) + 
+        scale_fill_manual(values = c("forestgreen", "skyblue")) + 
+        labs(x = "Years from first offer", 
+             y = "Survival",
+             shape = "Transplant",
+             color = "Scenario",
+             fill = "")
+    
+    if (output == "plot") {
+
+        out <- p +        
+            geom_step(aes(y = S_a, color = "Take kidney A now"), size = 1.2) +
+            geom_step(aes(y = S_b, color = "Wait for kidney B"), size = 1.2) +
+            geom_point(aes(y = kidney_a, shape ="Kidney A"), size = 3) + 
+            geom_point(aes(y = kidney_b, shape ="Kidney B"), size = 3) +
+            ggrepel::geom_label_repel(aes(y = transplant_surv, label = transplant),
+                                      min.segment.length = 0,
+                                      nudge_y = -0.15)
+    } 
+    
+    if (output == "wait_plot"){
+
+        out <- p + 
+            geom_step(aes(y = S_a, color = "Take kidney A now"), size = 1.2) +
+            geom_step(aes(y = S_wait, color = "Remain on waitlist"), size = 1.2)+
+            geom_step(aes(y = S_b, color = "Wait for kidney B"), size = 1.2) +
+            geom_point(aes(y = kidney_a, shape ="Kidney A"), size = 3) + 
+            geom_point(aes(y = kidney_b, shape ="Kidney B"), size = 3) +
+            ggrepel::geom_label_repel(aes(y = transplant_surv, label = transplant),
+                                      min.segment.length = 0,
+                                      nudge_y = -0.15)
+            
+    }
+    
+    
+    if (output == "rmst"){
+        
+        df <- df %>%
+            mutate(surv_diff = S_a - S_b)
+        
+        prob_death_pre_b <- (1- filter(df, time == t_b)$S_b)
+        
+        
+        rmst_df <-df %>%
+            mutate(days = (S_a - S_b)*(time-lag(time)),
+                   days = ifelse(row_number() == 1, 0, days),
+                   rmst = cumsum(days)) 
+        
+        days_a <- round(filter(rmst_df, time == t_a + 5*365)$rmst, digits = 1)
+        
+        if (days_a < 0){
+            out <-  paste0("Waiting ", 
+                           (t_b - t_a), " days for Kidney B would increase survival by ", 
+                           (-days_a), " days on average within the first 5 years following transplant. The probability the patient dies while waiting is for Kidney B is ", 
+                           round(100*prob_death_pre_b), "%.")
+        } else {
+            out <-  paste0("Accepting Kidney A now would increase survival by ", 
+                           days_a, " days on average within the first 5 years following transplant compared to waiting ",(t_b - t_a), " days for Kidney B. The probability the patient dies while waiting for Kidney B is ", round(100*prob_death_pre_b), "%.")
+            
+        }
+        
+    }
+    
+    if (output == "table"){
+        benefit_df <- df %>%
+            filter(time %in% c(t_a + 365, t_a + 3*365,t_a + 5*365))
+        
+        
+        out <- benefit_df %>%
+            mutate(surv_benefit = S_a - S_b,
+                   sb_a = S_a - S_wait,
+                   sb_b = S_b - S_wait,
+                   years_from_first_offer = (time - t_a)/365) %>%
+            select("Years from first offer" = years_from_first_offer , 
+                   "Survival (accept A)" = S_a,
+                   "Survival (wait for B)" = S_b,
+                   "Survival (waitlist)" = S_wait, 
+                   "Survival Benefit of Accepting A compared to waiting forever" = sb_a,
+                   "Survival Benefit of wating for B compared to waiting forever" = sb_b,
+                   "Survival Benefit of Accepting A over waiting for B" = surv_benefit) %>%
+            mutate(across(c(2,3,4,5,6,7), percent)) %>%
+            kable()
+        
+    }
+    
+    
+    
+    return(out)
+    
+}
+
+```
+
+## KDPI 80% now vs. wait a year for KDPI 40%
+
+```{r example_80_now_v_40_in_a_year}
+wait_for_better(100, 80, 15,
+                100+365, 15, 15, 
+                median_age, median_d_time, 
+                      median_dm, median_prev_transplant, "mean center")
+```
+
+Survival for the median recipient (`r median_age` years old, `r median_d_time` years of dialysis at listing, no diabetes) accepting an KDPI 80% kidney after 100 days of waiting compared to waiting an additional 365 days for a KDPI 40% kidney. Both grafts have 12-22 hours of ischemic time.
+
+```{r}
+wait_for_better(100, 80, 15,
+                100+365, 15, 15, 
+                median_age, median_d_time, 
+                      median_dm, median_prev_transplant, "mean center", 
+                output = "table")
+```
+
+```{r}
+wait_for_better(100, 80, 15,
+                100+365, 15, 15, 
+                median_age, median_d_time, 
+                      median_dm, median_prev_transplant, "mean center", 
+                output = "rmst")
+```
 
 ## Lives-saved, Life-years saved, and Graft Survival
 
@@ -1478,152 +1823,85 @@ There are several ethically relevant measures of the efficiency of the DDKT allo
 
 -   Life-years saved with each transplant
 
-In a metric considered for incorporation into the kidney allocation system, Wolfe et. al calculated a quality adjusted measured of life-years saved, the Life-years from transplantation (LYFT) [@wolfe2008a].
-
-$$
+In a metric considered for incorporation into the kidney allocation system, Wolfe et. al calculated a quality adjusted measured of life-years saved, the Life-years from transplantation (LYFT) [@wolfe2008a]. $$
 \begin{aligned} 
 LFYT  & = 1.0*(Median \, years \,  with \,  functioning \,  graft) \\
       &  \:  \:  \:  \:  + 0.8*(Median \,  years \,  after \,  graft \,  failure) \\
       & \:  \:  \:  \:  - 0.8*(Median \,  years \,  without \,  transplantation)
 \end{aligned}
-$$
+$$ While we believe our paper represents several important methodologic improvements in survival modeling over LYFT (detailed below), the LYFT models find the same core result as we did- greater short-term survival benefit of DDKT for the elderly.
 
-This is the improvement in **median** quality-adjusted life-years from transplantation. Median years of life is equivalent to the point in time when the predicted survival function is 50%. Absolute survival benefit over a defined time period, the focus of this paper, is a **fundamentally different** measurement of the transplant efficiency that (if used to rank order candidates) would prioritize very different candidates.
+![Short-term survival benefit in the LFYT models favors older patients](LFYT_paper.pdf){width="50%"}
 
-![](long_term_projection.pdf)
+However, close inspection of the LYFT equation reveals why younger patients get more LYFT. LYFT is the improvement in **median** quality-adjusted life-years from transplantation. Median years of life is equivalent to the point in time when the predicted survival function is 50%. The younger recipients catch up in LYFT is the extrapolation to the median survival time.
 
-## Methodologic issues with LFYT
+![Long-term survival projections required to calculate LYFT](long_term_projection.pdf){width="50%"}
 
-1.  Projection
+This projection extends far beyond the support of the data for post-transplant survival and cannot be directly estimated. The authors do this by assuming the relative survival benefit of transplant on the log hazard scale remains constant.
 
-## Advantages of lives saved at 5-years over LYFT
+![](extrapolation_slopes.png){width="50%"}
 
-    -   Improved methodology
-        -   Joint semi-proportional hazards model instead of 6 seperate cox models
-        -   Candidate characteristics interacted with time of transplant, donor characteristics
-        -   Avoids extrapolation beyond the end of the data (informative censoring)
-        -   No subjective quality-adjustment for dialysis time
-    -   Ethical reasons
-        -   LYFT is a pure life-years saved system, which is will save *fewer* lives at shorter time point
-       
-        -   LYFT severely disadvantages the elderly 
-        -   Lives saved at 5-years better identifies the "most urgent" candidates per Final Rule
+This model of patient survival after graft failure is the least supported by data, estimated by "the difference between lifespan following transplant and the lifespan of the functioning graft". However it is possible that after graft failure the patient would "regress to the mean" and the survival curves would converge.
 
-## Focusing on life-years shifts allocation to the young
+## Methodology improvements compared to LFYT
 
-By projecting out to median survival (far beyond the )
+1.  Joint semi-proportional hazards model instead of 6 separate cox models
+2.  Candidate characteristics interacted with time of transplant, donor characteristics
+3.  Avoids extrapolation beyond the end of the data (informative censoring)
+4.  No subjective quality-adjustment for dialysis time
 
-However this is just one relevant point in the distribution of survival times. Alternative metrics include
+## Ethical advantages to lives saved at 5-years over LYFT
 
-## LFYT models found similar distribution of short term-survival benefit
+Absolute survival benefit over a defined time period, the focus of this paper, is a **fundamentally different** measurement of the transplant efficiency that (if used to rank order candidates) would prioritize very different candidates.
 
-![](LFYT_paper.pdf)
+1.  No subjective quality-adjustment for dialysis time
 
-The LYFT models find the same core result as we did- greater short-term survival benefit for the elderly. But the reason the younger recipients catch up is they need to extrapolate to the median survival time
+2.  LYFT is a pure life-years saved system, which is will save **fewer** lives at shorter time point
 
--   Absolute improvement in survival probability at a specified time. This generates the **lives saved per kidney transplantated** at a certain time
+3.  LYFT severely disadvantages the elderly
 
-$$Benefit =  S(5 \space years | transplant) - S(5 \space years| wait) dt $$
+4.  Lives saved at 5-years better identifies the "most urgent" candidates per Final Rule
 
--   Restricted mean survival time (RSMT): area under the curve
+## Ethical advantages of LYFT over to lives saved at 5-years
 
-$$Benefit = \int_{t_{transplant}}^{t_{end}} S(t | transplant) - S(t | wait) dt $$
+1.  Fair innings: right to priortize younger people because they are "worse off" for getting end-stage renal disease at a younger age
 
-This quantifies "lives saved over time"
+    -   10-years of survival benefit for a 30 year old is better than 5-years of survival benefit for a 70 year old.
 
-```{r}
-survival_benefit(t_transplant = 500, 782, 80, 2, 1, 0, 15, 25)
-```
+2.  Directly accounts for benefits of graft survival
 
-```{r ischemic_time_check, eval = FALSE}
-# Sanity Checks
-recips <- to_model %>%
-  filter(tx ==1) %>% 
-  mutate(time = t_2 - t_1,
-         i_time_quartile = cut_number(ischemic_time, 4))
+# Next steps and questions for discussion
 
+-   Limited set of covariates: EPTS candidate variables, KDRI, and ischemic time
 
-levels_i_time <- c(levels(recips$i_time_quartile), "unknown")
+-   Racial and gender equity- evaluate for unintended consequences
 
-recips <- recips %>%
-  mutate(i_time_quartile = ifelse(is.na(i_time_quartile), "unknown", as.character(i_time_quartile)),
-         i_time_quartile = factor(i_time_quartile, levels = levels_i_time)
-  )
+    -   hypothesis that racial and ethnic minority groups will have *higher* short-term survival benefit
 
-# gg_survplot <- function(strata_var, df, label){
-#   
-#   df <- df %>% filter(is.na({{strata_var}})== FALSE)
-#   
-#   
-#   str_vector <- select(df, {{strata_var}})[[1]]
-#   str_levels <- unique(str_vector)
-#   
-#   fit <- survfit(Surv(df[["time"]], df[["dead"]]) ~ str_vector)
-# 
-#   tibble(counts = fit$strata,
-#        sequence = names(fit$strata)) %>%
-#   uncount(counts) %>%
-#   cbind(
-#     tibble(time = fit$time,
-#        survival = fit$surv,
-#        lower = fit$lower,
-#        upper = fit$upper)
-#   ) %>%
-#   filter(time <= 1825) %>%
-#   ggplot(aes(x= time, y = survival, ymin = lower, ymax = upper, fill = sequence, color = sequence)) +
-#   geom_step() +
-#   scale_x_continuous(breaks = seq(0, 5*365, 365)) +
-#   geom_ribbon(alpha = 0.15, size =0) + lims(y = c(0.5,1)) +
-#     labs(fill = label, color = label)
-#   
-# }
-# 
-# gg_survplot(i_time_quartile, recips, label = "Ischemic time quartile") +
-#   labs(y = "Post-transplant patient survival", x = "Days (post-transplant)")
+-   Model does not directly account for non-proportional hazards of transplant (high risk of death immediately post-transplant)
 
-i_time_model <- survfit(Surv(time, dead) ~i_time_quartile, data = recips)
+    -   Risk of death days 0-30 greater with transplant than waiting
+    -   Can extend model structure to estimate this
 
+-   Need inputs into the transplantation now compared to waiting until a better kidney is available calculation
 
-survminer::ggsurvplot(i_time_model, xlim = c(0,5*365), ylim = c(0.5, 1), 
-                      censor = FALSE, conf.int = TRUE, break.time.by = 365,
-                      legend = "right", ylab= "Post-transplant patient survival")
+    -   Will depend on geography and candidate waiting time
 
+    -   Especially important for high-priority candidates
 
-summary(coxph(Surv(time, dead) ~ i_time_quartile, data = recips))
-```
-
-\pagebreak
-
-\pagebreak
+        -   i.e. Top 20% EPTS, high donor supply with 250 mile acuity circle
 
 # To do
 
--   Add survival benefit to the graph
+-   Calculate the survival benefit of the median transplant recipient at each center?
 
--   Fixed
-
-    -   Cold ischemic time maybe non-linear
-    -   fix days on waitlist
-    -   add survival benefit in absolute improvement in days
-    -   add % to each term in the model
-    -   post-tranpslant survival by ischemic time quartile
-
--   Survival benefit by center
-
--   Additional analyses
-
-    -   Age, racial, and gender equity
-    -   Quantify magnitude of center effects
+-   Racial, and gender equity
 
 -   Remaining modeling decisions
-
-    -   Adults, 2005-2010, kidney-alone: is this the right group?
 
     -   We decided against replacing KDPI with components for practical reasons
 
         -   Should we fix pediatric portion?
-
--   KDPI 1-99%
 
 # Supplement
 
@@ -1769,4 +2047,61 @@ summary(coxph(Surv(time, dead) ~ i_time_quartile, data = recips))
 # }
 
 
+```
+
+```{r ischemic_time_check, eval = FALSE}
+# Sanity Checks
+recips <- to_model %>%
+  filter(tx ==1) %>% 
+  mutate(time = t_2 - t_1,
+         i_time_quartile = cut_number(ischemic_time, 4))
+
+
+levels_i_time <- c(levels(recips$i_time_quartile), "unknown")
+
+recips <- recips %>%
+  mutate(i_time_quartile = ifelse(is.na(i_time_quartile), "unknown", as.character(i_time_quartile)),
+         i_time_quartile = factor(i_time_quartile, levels = levels_i_time)
+  )
+
+# gg_survplot <- function(strata_var, df, label){
+#   
+#   df <- df %>% filter(is.na({{strata_var}})== FALSE)
+#   
+#   
+#   str_vector <- select(df, {{strata_var}})[[1]]
+#   str_levels <- unique(str_vector)
+#   
+#   fit <- survfit(Surv(df[["time"]], df[["dead"]]) ~ str_vector)
+# 
+#   tibble(counts = fit$strata,
+#        sequence = names(fit$strata)) %>%
+#   uncount(counts) %>%
+#   cbind(
+#     tibble(time = fit$time,
+#        survival = fit$surv,
+#        lower = fit$lower,
+#        upper = fit$upper)
+#   ) %>%
+#   filter(time <= 1825) %>%
+#   ggplot(aes(x= time, y = survival, ymin = lower, ymax = upper, fill = sequence, color = sequence)) +
+#   geom_step() +
+#   scale_x_continuous(breaks = seq(0, 5*365, 365)) +
+#   geom_ribbon(alpha = 0.15, size =0) + lims(y = c(0.5,1)) +
+#     labs(fill = label, color = label)
+#   
+# }
+# 
+# gg_survplot(i_time_quartile, recips, label = "Ischemic time quartile") +
+#   labs(y = "Post-transplant patient survival", x = "Days (post-transplant)")
+
+i_time_model <- survfit(Surv(time, dead) ~i_time_quartile, data = recips)
+
+
+survminer::ggsurvplot(i_time_model, xlim = c(0,5*365), ylim = c(0.5, 1), 
+                      censor = FALSE, conf.int = TRUE, break.time.by = 365,
+                      legend = "right", ylab= "Post-transplant patient survival")
+
+
+summary(coxph(Surv(time, dead) ~ i_time_quartile, data = recips))
 ```
