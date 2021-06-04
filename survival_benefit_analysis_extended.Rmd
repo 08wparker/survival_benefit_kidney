@@ -1,0 +1,184 @@
+---
+title: "Calculating the Lives Saved with Deceased Donor Kidney Transplantation"
+author: "William F Parker, MD, MS,^1^, Yolanda Becker MD^1^, Robert Gibbons, PhD^1^" 
+date: "^1^University of Chicago"
+thanks: "This is the preliminary working draft of a commissioned paper for the National Academies of Sciences, Engineering, and Medicine study committee: A Fairer and More Equitable Cost-Effective and Transparent System of Donor Organ Procurement, Allocation, and Distribution. It has not undergone peer review and will undergo substantial changes after feedback from the committee. May 14, 2021"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_notebook:
+    theme: journal
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+bibliography: references.bib
+csl: national-academy-science-letters.csl
+urlcolor: blue
+---
+
+```{r packages, include = FALSE, cache = FALSE, echo = FALSE}
+library(survival)
+library(coxme)
+library(tidyverse)
+library(gtsummary)
+library(furrr)
+```
+
+```{r global_options, include=FALSE, cache = FALSE}
+library(knitr)
+opts_chunk$set(cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, linewidth=60)
+options(scipen = 999)
+```
+
+```{r functions}
+#Convenience functions 
+numextract <- function(string){
+  as.numeric(str_extract(string, "\\-*\\d+\\.*\\d*"))
+}
+comma <- function(x) format(x, digits = 3, big.mark = ",")
+comma_1 <- function(x) format(x, digits = 1, big.mark = ",")
+comma_2 <- function(x) format(x, digits = 2, big.mark = ",")
+comma_p <- function(x){
+  if (x < 0.001){
+    return("< 0.001")
+  }
+  if (x<0.01 & x>=0.001){
+    paste("=", format(x, digits = 3, big.mark = ","))
+  }
+  else{
+    paste("=", format(x, digits = 2, big.mark = ","))
+  }
+} 
+```
+
+```{r}
+library(tidyverse)
+library(haven)
+library(lubridate)
+library(survival)
+library(furrr)
+library(coxme)
+```
+
+
+```{r}
+load("model_fit_extended.Rdata")
+```
+
+```{r}
+i_time_cuts <- quantile(recips$ischemic_time, na.rm = TRUE, probs = c(0.25, 0.75))
+full_me_model <- me_models_test[[2]]
+
+full_me_model
+```
+
+
+```{r}
+test_sample %>%
+  count(center)
+```
+
+```{r log_hazard_function}
+sum_hazard <- function(param_list,start_hazard, covariate_values, model_coef){
+        h_out <- start_hazard
+        
+        for (wp in param_list ) {
+          #print(wp)
+          params <- str_split(wp, ":")
+          value <- prod(sapply(params[[1]], function(x) unname(covariate_values[x])))
+          #print(value)
+          beta <- unname(model_coef[wp])
+          #print(beta)
+          add_hz <- value*beta
+          #print(add_hz)
+          h_out <- h_out + add_hz
+  
+        }
+        return(h_out)
+}
+
+
+log_hazard <- function(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, 
+                            ischemic_time, kdpi,
+                            period = "wait",
+                            model= full_me_model,
+                            icuts = i_time_cuts,
+                            ...){
+  
+  no_dial <- ifelse(d_time == 0, 1,0)
+  age_floor_25 <- ifelse(Age < 25, 0, Age - 25)
+  log_dial_time <- log(d_time + 1)
+  tx_kdri <- KDRI_raw(kdpi)
+
+  i_time_low <- ifelse(ischemic_time <= icuts[[1]], 1, 0)
+  i_time_high <- ifelse(ischemic_time > icuts[[2]], 1, 0)
+  
+  user_patient_params <- c(age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX, 
+                           i_time_low, i_time_high, tx_kdri)
+  
+  names(user_patient_params) <- c("age_floor_25", "log_dial_time", "no_dial", "diabetes", "CAN_PREV_TX",
+                                  "i_time_low", "i_time_high", "tx_kdri")
+  
+  user_patient_params[["i_time_unknown"]] <- 0
+
+  fixed_effects <- fixef(model)
+  x_vars <- names(fixed_effects)
+  ref <- data.frame(ranef(model)[[1]])
+  ref$center <- row.names(ref)
+  
+  if (ctr_id == "mean center"){
+    tx_ref <- 0
+    int_ref <- 0
+  } else {
+      tx_ref <- filter(ref, center == ctr_id)$tx
+      int_ref <- filter(ref, center == ctr_id)$Intercept
+  }
+  
+  if (period == "wait"){
+    entered_params <- c(user_patient_params, "tx" =0, "immediate_post_trans"=0, "second_post_trans_int" =0)
+    entered_params[["tx_kdri"]] <- 0
+    st_hazard <- int_ref
+  }
+  
+  if (period == "immediate_post_trans"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=1, "second_post_trans_int" =0)
+      st_hazard <- int_ref + tx_ref
+  }
+  
+  if (period == "second_post_trans_int"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=0, "second_post_trans_int" =1)
+      st_hazard <- int_ref + tx_ref
+  }
+  
+    if (period == "long_post_tx"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=0, "second_post_trans_int" =0)
+      st_hazard <- int_ref + tx_ref
+  }
+  # print(x_vars)
+  # print(st_hazard)
+  # print(entered_params)
+  # print(fixed_effects)
+  h_out <- sum_hazard(x_vars, st_hazard, entered_params, fixed_effects)
+  return(h_out)
+
+}
+```
+
+
+```{r}
+log_hazard("mean center", 20, 0.00000001, 0, 0, 15, 24, period = "long_post_tx")
+```
+
+
+### Figure 2: Baseline survival function $\hat{S}_0(t)$
+
+```{r baseline_hazard_plot}
+full_base_hz %>%
+  mutate(survival = exp(-hazard),
+         time = time/365) %>%
+  ggplot(aes(x = time, y = survival)) +
+  geom_step() + lims(y = c(0,1)) + 
+  labs(x = "Years after listing") + 
+  ggthemes::theme_gdocs() 
+```
+
