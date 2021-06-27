@@ -1,0 +1,1181 @@
+---
+title: "Saving more lives with Deceased Donor Kidney Transplantation"
+author: "William F Parker, MD, MS,^1^, Yolanda Becker MD^1^, Robert Gibbons, PhD^1^" 
+date: "^1^University of Chicago"
+thanks: "A commissioned paper for the National Academies of Sciences, Engineering, and Medicine study committee: A Fairer and More Equitable Cost-Effective and Transparent System of Donor Organ Procurement, Allocation, and Distribution. June, 2021"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+    toc_depth: 2
+  word_document:
+    reference_docx: word_style_times_new_roman_1.docx
+  html_notebook:
+    theme: journal
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+bibliography: references.bib
+csl: national-academy-science-letters.csl
+urlcolor: blue
+---
+
+```{r packages, echo=FALSE, cache=FALSE, include=FALSE}
+library(survival)
+library(coxme)
+library(tidyverse)
+library(gtsummary)
+library(furrr)
+library(kableExtra)
+library(gridExtra)
+library(lubridate)
+no_cores <- availableCores() - 1
+```
+
+```{r global_options, include=FALSE, cache = FALSE}
+library(knitr)
+opts_chunk$set(cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, linewidth=60)
+options(scipen = 999)
+```
+
+```{r functions}
+#Convenience functions 
+numextract <- function(string){
+  as.numeric(str_extract(string, "\\-*\\d+\\.*\\d*"))
+}
+comma <- function(x) format(x, digits = 3, big.mark = ",")
+comma_1 <- function(x) format(x, digits = 1, big.mark = ",")
+comma_2 <- function(x) format(x, digits = 2, big.mark = ",")
+comma_p <- function(x){
+  if (x < 0.001){
+    return("< 0.001")
+  }
+  if (x<0.01 & x>=0.001){
+    paste("=", format(x, digits = 3, big.mark = ","))
+  }
+  else{
+    paste("=", format(x, digits = 2, big.mark = ","))
+  }
+} 
+
+```
+
+# Abstract
+
+> Deceased donor organs are the definitive treatment for end-stage organ failure, but unfortunately, this life-saving treatment is absolutely scarce. The organ shortage is most severe for deceased donor kidney transplantation. Only a quarter of candidates receiving a transplant within five years of listing, and a newly listed candidate is more likely to die or be removed from the list than receive a transplant. Despite this, the current kidney allocation system largely ignores medical urgency, and transplant programs discard 1 in 5 deceased donor kidneys recovered for transplantation due to perceived low benefit. We use modern survival analysis methodology to model the survival benefit of deceased donor kidney transplantation and present the results in an easy-to-use web application. This model has the potential to 1) improve shared decision-making between transplant programs and patients when making accept-reject decisions and 2) identify medically urgent transplantation candidates to align kidney allocation policy with federal law. Incorporating survival benefit into deceased donor kidney allocation has the potential to save more lives and reduce racial/ethnic disparities in kidney transplantation.
+
+\pagebreak
+
+# Introduction
+
+Deceased donor organs are absolutely scarce. Thousands of patients fortunate enough to get listed will die on the waiting list every year [@national], and countless others who would benefit from a transplant lack access. While efforts to expand the donor pool and encourage transplantation of marginal donors are critical to minimize the shortage, the fact remains that demand for organ transplantation will exceed supply in the U.S. for the foreseeable future. Policymakers at the Organ Procurement and Transplant Network (OPTN) must confront a tragic choice; they must rank order human beings for a life-saving, medically necessary therapy.
+
+The Department of Health and Human Services' Final Rule directs the OPTN to design organ allocation policies "to achieve the best use of donated organs" [@e-cfr:t]. Specifically, the OPTN must rank candidates from "most to least medically urgent" while "taking into account... that life-sustaining technology allows alternative approaches." The survival benefit from a transplant, or each candidates' improvement in survival from organ transplantation, represents a direct quantification of the efficiency principles in the Final Rule, statistically quantifying the "lives saved" from each transplant. Like liver, heart, and lung transplantation[@krakauer2005; @merion2005; @singh2014; @parker2019; @egan2006], kidney transplantation dramatically improves recipient survival compared to remaining on dialysis [@wolfe1999; @schnitzler2005; @orandi2016; @Cohen2017]. Dialysis may be a "life-sustaining measure," but it is much less effective at sustaining life than kidney transplantation.
+
+However, compared to the other solid organ allocation systems, the current Kidney Allocation System (KAS) does not rank-order candidates by medical urgency as required by the Final Rule. KAS ranks candidates mainly by dialysis waiting time, with additional priority for hard-to-match highly sensitized patients and candidates with high Expected Post-Transplant Survival (EPTS). The policy does explicitly prioritize candidates who no longer have viable options for dialysis access, appreciating that kidney transplantation is acutely life-saving for these candidates. However, this limited policy measure fails to account for the widely varying risk of death while waiting on dialysis [@unitedstatesrenaldatasystem2020].
+
+Compounding the fact that the current kidney allocation policy largely ignores medical urgency, U.S. transplant programs discarded 1 in 5 kidneys recovered in 2019 for transplantation [@hart2021]. While centers have been more likely to accept hepatitis C-positive donors over time, donors sorted into a lower allocation sequence by the Kidney Donor Profile Index (KDPI) score have a substantially higher probability of discard. Less than 5% of sequence A and B kidneys (KDPI \< 35%) were discarded compared to 20% of sequence C kidneys (KDPI 35-85%) and 60% of sequence D kidneys (KDPI\> 85%) [@hart2021]. Accepting a "lower quality" kidney- indicated by either Extended Donor Criteria, increased risk for disease transmission (IRD), or Kidney Donor Profile Index (KDPI) over 70%- leads to a significant survival benefit at 5-years post-transplant compared to waiting for a better organ for the vast majority of patients [@merion2005a; @massie2014; @bowring2018]. Similarly, graft survival at three years is higher with accepting a high KDPI now rather than waiting for a better graft, except for very high priority candidates in a high local donor supply environment [@wey2018]. The high discard rate reduces both the total lives saved by the system and outcomes for individual patients.
+
+We present a model of the survival benefit model of deceased donor kidney transplantation (DDKT) that improves upon the existing literature by using modern survival analysis methodology to account for center effects, time-dependent covariates, non-proportional hazards, and interactions between candidate and donor variables in a single joint model of the pre and post-transplant period, specifically designed so the model output would easily translate into an accessible end-application that presents more information than KDPI and allows transplant programs and patients to compare deceased donor kidney offers. We developed this improved survival benefit model of deceased donor kidney transplantation to address three key aims:
+
+1.  **Demonstrate how the current Kidney Allocation System is inconsistent with the Final Rule.** A rigorous survival benefit model with easy to interpret outputs is necessary to conclusively demonstrate how the current ranking of candidates on the wait-list fails to meet the Final Rule requirements of transplanting the patients with the most to gain.
+2.  **Improve shared decision making in accept-reject decisions for deceased donor kidney offers.** Part of the low acceptance rates of higher KDPI kidneys may be that patients and transplant physicians have an incomplete representation of the survival benefit of kidney transplantation relative to remaining on the wait-list. Incorporating accessible representations of survival benefit would improve shared decision making between patients and their physicians and has the potential to reduce discards.
+3.  **Improve the evaluation of transplant center performance.** Transplant programs are currently evaluated based on post-transplant survival, not survival benefit. While assessments of post-transplant survival are case-mix adjusted for medical urgency by the SRTR, this is fundamentally different than evaluating centers based on the number of lives saved per kidney transplant. We aimed to demonstrate the potential advantages of assessing program performance based on lives saved with transplantation instead of post-transplant survival.
+4.  **Determine the potential impact of incorporating survival benefit into kidney allocation on racial/ethnic disparities in kidney transplantation.** While the Kidney Allocation System led to improvement in the raw transplantation rates for underserved populations that gain access to the list [@Hart2021; @Melanson2017], significant structural inequities remain embedded in the system. Black patients are less likely to be listed for transplantation[@Zhang2018] and have less than half the chance of receiving a preemptive transplantation compared to White patients[@King2019]. The disparities continue after listing. Transplant programs are more likely to place Black and Hispanic in "inactive" status and highly-sensitized Black patients are significantly less likely to transplanted[@Kulkarni2019]. Therefore, determining how incorporating survival benefit into the Kidney Allocation System could mitigate or exacerbate structural racism in kidney transplantation is critical
+
+# Methods
+
+## Data Source and Study Population
+
+This study was a secondary analysis of de-identified, pre-collected data and was granted exemption status by the University of Chicago Biological Sciences Division/University of Chicago Medical Center IRB to be performed without patient consent. This study used data from the [SRTR (Scientific Registry of Transplant Recipients)](https://www.srtr.org/about-the-data/the-srtr-database/). The SRTR data system includes data on all donors, wait-listed candidates, and transplant recipients in the United States, submitted by the members of the OPTN. The Health Resources and Services Administration, U.S. Department of Health and Human Services provides oversight to the activities of the OPTN and SRTR contractors.
+
+We extracted records on all adult ($\geq 18$ years of age at listing), kidney-alone candidates listed between January 1st, 2005 and December 31st, 2010. We extracted the candidate covariates included in the Estimated Post-Transplant Survival Model (EPTS) [@eptscal]: age, dialysis time, diabetic status, and history of previous organ transplant. We included one initial observation per candidate, defining the beginning of the wait-list period as the date of the first registration for candidates with multiple registrations. The observation time interval spans from the date of initial listing until transplant, death (including deaths after de-listing), or last time observed on the wait-list (for untransplanted candidates who do not have a recorded death date). The SRTR dataset includes monthly updates from the National Technical Information Service's (NTIS) [Death Master File](https://dmf.ntis.gov/) to capture deaths after de-listing that are not recorded by transplant programs.
+
+For candidates that survived long enough to receive a deceased donor kidney transplant, we created 1-3 additional observations with their updated candidate covariates, donor KDRI, and cold ischemic time to capture the varying risk of death post-transplant over time [@massie2014]. The first observation begins at the time of transplant and ends at death or 30 days post-transplant, the second begins at day 30 post-transplant and ends at death or day 180. The last observation spans from day 180 post-transplant to death or last-follow up time. See **Table S1** in the appendix for more detailed description of the data.
+
+## Survival benefit model
+
+The primary outcome was the survival benefit of deceased donor kidney transplantation at 5-years post-transplantation estimated with a mixed-effects Cox proportional hazard model with transplant treated as a time-dependent predictor variable [@parker2019; @ripatti2000; @therneau2003]. This model accounts for the non-proportional hazard of transplantation by estimating the hazard of death in four distinction time periods: 1) pre-transplant, 2) within 30 days post-transplant, 3) day 30-180 post-transplant a nd 4) beyond 180 days post-transplantation. The model has a center-level random intercept and random transplant effect which accounts for the clustering of patients within centers and allows for the risk of death with and without transplantation to vary at the center level.
+
+We restricted the patient-level model covariates to the variables currently readily available at the time of organ allocation: candidate characteristics used in the EPTS score (age, diabetes status, duration of dialysis, and history of previous organ transplantation), donor KDPI, and ischemic time. We included all interaction terms previously found to influence wait-list or post-transplant survival and chose to retain all the interaction terms regardless of significance to control for selection behaviors by transplant physicians[@bae2019a]. Data from after transplantation, such as the timing of post-transplant graft failure, does not enter into the model. We estimated the model by maximum likelihood with the `coxme` package in `R` [@therneau2018_coxme].
+
+To calculate the absolute estimated survival with and without transplantation, we applied the time-dependent predicted log hazard from the model to a non-parametric estimate of the baseline hazard (**Figure S1**) [@parker2019]. This technique allows the survival benefit to be quantified on a clinically relevant and intuitive scale. We calculated the 5-year survival with and without transplant and survival benefit for all recipients in our study cohort and then estimated the mean, median, and intraquartile range of all three outcomes. See the **supplemental material** for technical description of the model, additional methodology, and complete statistical code.
+
+## Association of medical urgency and EPTS with survival benefit
+
+We determined the association of 5-year mortality without transplant (medical urgency), estimated post-transplant survival (mapped to the 2019 percentiles [@eptscal]), candidate characteristics and KDPI with survival benefit. To specifically evaluate the compliance of the top 20% KDPI to top 20% EPTS policy with the Final Rule, we estimated the survival benefit of a top 20% KPDI kidney by EPTS %. Finally, we determined the association between the candidate variables that compose EPTS (age, dialysis, history of diabetes, and history of previous transplantation) with survival benefit.
+
+## Shared-decision making offer comparision tool
+
+When considering a deceased donor kidney offer, the proper counter-factual is not remaining on the waitlist indefinitely *without* transplantation. Turning down a particular kidney does not may give a candidate the ability to accept a subsequent offer for a better graft, assuming they survive to receive the next offer.
+
+## Association of transplant center with survival benefit
+
+Following standard methodology employed by the Center for Medicare and Medicaid Services [@krumholz2006; @shahian2005], we calculated the average survival benefit across kidney transplant programs, case-mix adjusting for donor variables.
+
+## Association of race/ethnicity with survival benefit
+
+Finally, we estimated the average survival benefit by racial/ethnic group, adjusted for age.
+
+All analyses were performed using `R` version 3.6.1 (R Foundation for Statistical Computing). We used 2-sided statistical tests and a p-value of \< 0.05 to reject the null hypothesis.
+
+# Results
+
+## Description of the study population
+
+```{r load_data_and_recreate_raw_epts}
+load("model_fit_extended.Rdata")
+
+extended_to_model <- extended_to_model %>%
+    mutate(raw_epts = 0.047*age_floor_25 - 0.015*diabetes*age_floor_25+
+           0.398*CAN_PREV_TX- 0.237*diabetes*CAN_PREV_TX+
+           0.315*log(dialysis_time_years + 1)- 0.099*diabetes*log(dialysis_time_years + 1) +
+           0.130*no_dial - 0.348*no_dial +  
+           1.262*diabetes
+         )
+```
+
+```{r epts_mapping_function}
+epts_mapping_table <-read_csv("epts_mapping_table_2019.csv") %>%
+  mutate(midpoint = (max-min)/2 + min,
+         EPTS = row_number()-1) %>%
+  filter(EPTS > 0 & EPTS<100)
+
+
+EPTS_mapper <- function(raw_EPTS, mapping_table =epts_mapping_table){
+    df <- mapping_table %>%
+    mutate(cur_EPTS = raw_EPTS) %>%
+    filter(cur_EPTS> min & cur_EPTS < max)
+    
+  EPTS_max <- max(mapping_table$max)
+  EPTS_min <- min(mapping_table$min)
+
+  if (nrow(df) > 0){
+    return(df$EPTS)
+  }
+  if (raw_EPTS > EPTS_max){
+    return(100)
+  }
+  if (raw_EPTS < EPTS_min) {
+    return(0)
+  }
+}
+```
+
+```{r map_EPTS, eval = FALSE}
+plan(multisession, workers = no_cores)
+EPTS <- future_map_dbl(extended_to_model$raw_epts, EPTS_mapper)
+save(EPTS, file = "EPTS_values.Rdata")
+```
+
+```{r load_EPTS}
+load("EPTS_values.Rdata")
+extended_to_model <- extended_to_model %>%
+  cbind(EPTS) 
+```
+
+```{r sample_counts}
+n_adults_pre_center_filter <- waitlist %>% nrow()
+
+n_candidates <- extended_to_model %>%
+  group_by(PX_ID) %>%
+  arrange(t_1) %>%
+  filter(row_number() == 1) %>%
+  nrow()
+
+n_recips_total <- to_model %>%
+  filter(tx ==1) %>% 
+  nrow()
+
+n_recips_minus_centers <- extended_to_model %>% 
+  filter(tx ==1 & immediate_post_trans ==1) %>%
+  select(PX_ID, center, age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX, 
+         tx,immediate_post_trans, second_post_trans_int, i_time_low, i_time_high, i_time_unknown, tx_kdri, t_1, t_2, dead) %>%
+  nrow()
+
+recips <- extended_to_model %>% 
+  filter(tx ==1 & immediate_post_trans ==1) %>%
+  select(PX_ID, center, age, age_floor_25, dialysis_time_years, log_dial_time, no_dial, diabetes, CAN_PREV_TX, 
+         tx,immediate_post_trans, second_post_trans_int, 
+         ischemic_time, i_time_low, i_time_high, i_time_unknown, tx_kdri, 
+         t_1, t_2, dead, 
+         raw_epts, EPTS,
+         REC_TX_DT) %>%
+  na.omit()
+
+n_recips <- recips %>% nrow()
+
+no_trans <- n_candidates - n_recips
+dead_no_trans <- extended_to_model %>% 
+  filter(tx ==0 & dead ==1) %>%
+  nrow()
+
+wait_end_fu <- n_candidates - n_recips - dead_no_trans
+
+mean_fu <-extended_to_model %>%
+  group_by(PX_ID) %>%
+  arrange(t_2) %>%
+  filter(row_number() == n()) %>%
+  filter(t_2>0) %>%
+  ungroup() %>%
+  group_by(tx, dead) %>%
+  summarise(mean_f_up = mean(t_2))
+
+mean_fu_survivor_recip <- filter(mean_fu, tx ==1 & dead==0)$mean_f_up/365
+```
+
+```{r add_race_data}
+cand_kipa <- haven::read_sas("data/cand_kipa.sas7bdat")
+
+extended_to_model <- extended_to_model %>%
+  left_join(cand_kipa %>% select(PX_ID, CAN_RACE)) %>%
+  mutate(race = case_when(
+    CAN_RACE == 16 ~ "Black",
+    CAN_RACE == 2000 ~ "Hispanic/Latino",
+    CAN_RACE == 8 ~ "White",
+    CAN_RACE %in% c(64, 128) ~ "Asian/Pacific Islander",
+    TRUE ~ "Other"
+  ))
+
+recips <- recips %>%
+  left_join(cand_kipa %>% select(PX_ID, CAN_RACE)) %>%
+  mutate(race = case_when(
+    CAN_RACE == 16 ~ "Black",
+    CAN_RACE == 2000 ~ "Hispanic/Latino",
+    CAN_RACE == 8 ~ "White",
+    CAN_RACE %in% c(64, 128) ~ "Asian/Pacific Islander",
+    TRUE ~ "Other"
+  ))
+```
+
+There were `r n_adults_pre_center_filter %>% comma()` adult candidates listed for deceased donor kidney transplantation between January 1st, 2005 and December 31st, 2010. We excluded `r (n_adults_pre_center_filter - n_candidates)` candidates who were listed at a low volume center and `r n_recips_minus_centers-n_recips` for missing data. Out of the remaining `r n_candidates` candidates, `r n_recips %>% comma()` (`r comma(100*(n_recips)/(n_candidates))` %) had received a transplant by the end of followup (March 1st, 2021) (**Table 1**).
+
+Of the remaining `r comma(n_candidates - n_recips)`candidates who did not receive a transplant, `r comma(dead_no_trans)`(`r round(100*dead_no_trans/no_trans)`%) died by the end of followup. Mean follow-up for surviving transplant recipients was `r round(mean_fu_survivor_recip,1)` years.
+
+```{r map_KDPI_recips, eval = FALSE}
+plan(multisession, workers = no_cores)
+recip_kdpi <- future_map_dbl(recips$tx_kdri, KDPI_mapper)
+save(recip_kdpi, file = "recipient_kdpi_values.Rdata")
+```
+
+```{r load_recip_kpdi}
+load("recipient_kdpi_values.Rdata")
+
+recips <- recips %>%
+  cbind(kdpi = recip_kdpi)
+```
+
+```{r median_recipient_details}
+median_t_transplant <-  round(median(recips$t_1, na.rm = TRUE))
+median_d_time <- round(median(recips$dialysis_time_years, na.rm = TRUE), digits =1)
+
+median_dm <- median(recips$diabetes)
+mean_dm <-  mean(recips$diabetes)
+
+median_prev_transplant <- median(recips$CAN_PREV_TX, na.rm = TRUE)
+mean_prev_transplant <- mean(recips$CAN_PREV_TX, na.rm = TRUE)
+
+median_age <- round(median(recips$age, na.rm = TRUE))
+median_ischemic_time <- mean(recips$ischemic_time, na.rm = TRUE)
+median_kdpi <- median(recip_kdpi, na.rm = TRUE)
+```
+
+The median deceased donor kidney transplant recipient was `r median_age` at transplant
+
+
+
+## The association of survival benefit with medical urgency and Estimated Post-Transplant Survival (EPTS)
+
+```{r identify_model}
+i_time_cuts <- quantile(recips$ischemic_time, na.rm = TRUE, probs = c(0.25, 0.75))
+full_me_model <- me_models[[1]]
+full_base_hz <- hz_list[[4]]
+```
+
+```{r log_hazard_function}
+sum_hazard <- function(param_list,start_hazard, covariate_values, model_coef){
+        h_out <- start_hazard
+        
+        for (wp in param_list ) {
+
+          params <- str_split(wp, ":")
+          value <- prod(sapply(params[[1]], function(x) unname(covariate_values[x])))
+          #print(value)
+          beta <- unname(model_coef[wp])
+          #print(beta)
+          add_hz <- value*beta
+          #print(add_hz)
+          h_out <- h_out + add_hz
+  
+        }
+        return(h_out)
+}
+
+
+log_hazard <- function(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, 
+                            ischemic_time, kdpi,
+                            period = "wait",
+                            model= full_me_model,
+                            icuts = i_time_cuts,
+                            ...){
+  
+  no_dial <- ifelse(d_time == 0, 1,0)
+  age_floor_25 <- ifelse(Age < 25, 0, Age - 25)
+  log_dial_time <- log(d_time + 1)
+  tx_kdri <- KDRI_raw(kdpi)
+
+  i_time_low <- ifelse(ischemic_time <= icuts[[1]], 1, 0)
+  i_time_high <- ifelse(ischemic_time > icuts[[2]], 1, 0)
+  
+  user_patient_params <- c(age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX, 
+                           i_time_low, i_time_high, tx_kdri)
+  
+  names(user_patient_params) <- c("age_floor_25", "log_dial_time", "no_dial", "diabetes", "CAN_PREV_TX",
+                                  "i_time_low", "i_time_high", "tx_kdri")
+  
+  user_patient_params[["i_time_unknown"]] <- 0
+
+  fixed_effects <- fixef(model)
+  x_vars <- names(fixed_effects)
+  ref <- data.frame(ranef(model)[[1]])
+  ref$center <- row.names(ref)
+  
+  if (ctr_id == "mean center"){
+    tx_ref <- 0
+    int_ref <- 0
+  } else {
+      tx_ref <- filter(ref, center == ctr_id)$tx
+      int_ref <- filter(ref, center == ctr_id)$Intercept
+  }
+  
+  if (period == "wait"){
+    entered_params <- c(user_patient_params, "tx" =0, "immediate_post_trans"=0, "second_post_trans_int" =0)
+    entered_params[["tx_kdri"]] <- 0
+    entered_params[["i_time_low"]] <- 0
+    entered_params[["i_time_high"]] <- 0
+    st_hazard <- int_ref
+  }
+  
+  if (period == "post_1"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=1, "second_post_trans_int" =0)
+      st_hazard <- int_ref + tx_ref
+  }
+  
+  if (period == "post_2"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=0, "second_post_trans_int" =1)
+      st_hazard <- int_ref + tx_ref
+  }
+  
+    if (period == "post_3"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=0, "second_post_trans_int" =0)
+      st_hazard <- int_ref + tx_ref
+  }
+  # print(x_vars)
+  # print(st_hazard)
+  # print(entered_params)
+  # print(fixed_effects)
+  h_out <- sum_hazard(x_vars, st_hazard, entered_params, fixed_effects)
+  return(h_out)
+
+}
+```
+
+```{r calculate_log_hr, eval = FALSE}
+l_wait <- list(ctr <- recips$center,
+          Age <- recips$age,
+          d_time <- recips$dialysis_time_years,
+          diabetes <- recips$diabetes,
+          CAN_PREV_TX <- recips$CAN_PREV_TX,
+          ischemic_time <- recips$ischemic_time,
+          kdpi <- recip_kdpi)
+
+l_post_1 <- list(ctr <- recips$center,
+          Age <- recips$age,
+          d_time <- recips$dialysis_time_years,
+          diabetes <- recips$diabetes,
+          CAN_PREV_TX <- recips$CAN_PREV_TX,
+          ischemic_time <- recips$ischemic_time,
+          kdpi <- recip_kdpi,
+          period <- rep("post_1", length(recips$age)))
+
+
+l_post_2 <- list(ctr <- recips$center,
+          Age <- recips$age,
+          d_time <- recips$dialysis_time_years,
+          diabetes <- recips$diabetes,
+          CAN_PREV_TX <- recips$CAN_PREV_TX,
+          ischemic_time <- recips$ischemic_time,
+          kdpi <- recip_kdpi,
+          period <- rep("post_2", length(recips$age)))
+
+l_post_3 <- list(ctr <- recips$center,
+          Age <- recips$age,
+          d_time <- recips$dialysis_time_years,
+          diabetes <- recips$diabetes,
+          CAN_PREV_TX <- recips$CAN_PREV_TX,
+          ischemic_time <- recips$ischemic_time,
+          kdpi <- recip_kdpi,
+          period <- rep("post_3", length(recips$age)))
+
+
+poss_log_hazard <- possibly(log_hazard, NA)
+wait_log_hr <- pmap_dbl(l_wait, poss_log_hazard)
+post_1_hr <- pmap_dbl(l_post_1, poss_log_hazard)
+post_2_hr <- pmap_dbl(l_post_2, poss_log_hazard)
+post_3_hr <- pmap_dbl(l_post_3, poss_log_hazard)
+
+
+hr_0_30 <-  post_1_hr - wait_log_hr
+hr_30_180 <- post_2_hr - wait_log_hr
+hr_180_plus <- post_3_hr - wait_log_hr
+
+
+hr_transplant <- tibble(PX_ID = recips$PX_ID, 
+                        hr_0_30, hr_30_180, hr_180_plus)
+
+write_csv(hr_transplant, "log_hr_transplant_recips.csv")
+```
+
+```{r summarize_hr_transplant}
+hr_transplant <- read_csv("log_hr_transplant_recips.csv")
+pct <- function(x, q) quantile(x, probs = q, na.rm = TRUE)[[1]]
+
+hr_tx_sum <- hr_transplant %>%
+  select(-PX_ID) %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  summarise(mean =  mean(value, na.rm = TRUE),
+            median =  median(value, na.rm = TRUE),
+            pct_25 =  pct(value, 0.25),
+            pct_75 = pct(value, 0.75),
+            sd  = sd(value, na.rm = TRUE),
+            obs = n())
+
+
+ ## Table: Hazard ratio of transplantation by time after transplant
+# hr_tx_sum %>%
+#   select(name, median, pct_25, pct_75) %>%
+#   mutate_if(is.numeric, exp) %>%
+#   arrange(-median) %>%
+#   mutate("Period post-transplant" = case_when(
+#     name == "hr_0_30" ~"Day < 30",
+#     name == "hr_30_180" ~"Day 30-180",
+#     TRUE ~ "Day > 180"
+#   ),
+#   "IQR" = paste0("(",round(pct_25, 2), 
+#                  " - ", round(pct_75, 2), ")")) %>%
+#   select("Period post-transplant", "Median HR" = median, "IQR") %>%
+#   kable(digits = 2)
+```
+
+Compared to not receiving a transplant, for the median recipient deceased donor kidney transplantation was associated with an increased risk of death during the first 30 days post-transplantation, Hazard Ratio [HR] `r filter(hr_tx_sum, name == "hr_0_30")$median %>% exp() %>% round(2)` but with significant variation between recipients (IQR [`r filter(hr_tx_sum, name == "hr_0_30")$pct_25 %>% exp() %>% round(2)` - `r filter(hr_tx_sum, name == "hr_0_30")$pct_75 %>% exp() %>% round(2)`]). During day 30-180 post-transplantation, the risk of death was lower with a transplant than waiting, HR `r filter(hr_tx_sum, name == "hr_30_180")$median %>% exp() %>% round(2)` (IQR [`r filter(hr_tx_sum, name == "hr_30_180")$pct_25 %>% exp() %>% round(2)` - `r filter(hr_tx_sum, name == "hr_30_180")$pct_75 %>% exp() %>% round(2)`]). Beyond 180 days post-transplantation, the survival benefit of deceased donor kidney transplant continued to increase, HR `r filter(hr_tx_sum, name == "hr_180_plus")$median %>% exp() %>% round(2)` (IQR [`r filter(hr_tx_sum, name == "hr_180_plus")$pct_25 %>% exp() %>% round(2)` - `r filter(hr_tx_sum, name == "hr_180_plus")$pct_75 %>% exp() %>% round(2)`]).
+
+```{r survival_benefit_function}
+percent <- function(x, digits = 1, format = "f", ...) {      
+  paste0(formatC(x * 100, format = format, digits = digits, ...), "%")
+}
+
+survival_benefit <-  function(t_transplant, 
+                              ctr_id, 
+                              Age, d_time, diabetes, CAN_PREV_TX, 
+                              ischemic_time, kdpi,
+                              output = "plot",  
+                              me_model = full_me_model, 
+                              isch_cuts = i_time_cuts,
+                              b_hazard = full_base_hz,
+                              post_tx_int_1 = 30,
+                              post_tx_int_2 = 180){
+  
+  log_hr_w <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "wait")
+  
+  log_hr_post_1 <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "post_1") 
+  
+  log_hr_post_2 <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "post_2")              
+
+  log_hr_post_3 <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "post_3")    
+                              
+  cum_hz <- filter(b_hazard, time == t_transplant)$hazard
+  
+  df <- b_hazard %>%
+  mutate(hazard = hazard- lag(hazard),
+                   hazard = ifelse(is.na(hazard), 0, hazard)) %>%
+  filter(time >= t_transplant) %>%
+  mutate(
+    time = time - t_transplant,
+    hazard_wait = hazard*exp(log_hr_w),
+    hazard_tx = case_when(
+      time < post_tx_int_1 ~ hazard*exp(log_hr_post_1),
+      time < post_tx_int_2 ~ hazard*exp(log_hr_post_2),
+      TRUE ~ hazard*exp(log_hr_post_3)
+      ),
+    H_tx = cumsum(hazard_tx),
+    H_wait = cumsum(hazard_wait),
+    S_tx = exp(-H_tx),
+    S_wait = exp(-H_wait),
+    S_tx_better = ifelse(S_tx >= S_wait, S_tx, NA),
+    S_tx_worse = ifelse(S_tx <= S_wait, S_tx, NA),
+    S_wait_better = ifelse(S_wait >= S_tx, S_wait, NA),
+    S_wait_worse = ifelse(S_wait <= S_tx, S_wait, NA))
+  
+  if (output == "dataframe"){
+    return(df)
+  }
+  
+  if (is.numeric(output)){
+    last_ob <- df %>%
+      filter(time == output)
+  
+    if (nrow(last_ob) > 0){
+      return(last_ob %>% 
+               select(S_tx, S_wait) %>%
+               mutate(benefit = S_tx - S_wait))
+    } else {
+      
+      return(tibble(S_tx = NA, S_wait = NA, benefit = NA) %>%
+               mutate_all(as.numeric))
+    }
+  }
+  
+
+  # if (output == "wait_5"){
+  #       last_ob <- df %>%
+  #     filter(time == 1825)
+  #     
+  #       if (nrow(last_ob) > 0){
+  #           return(last_ob$S_wait)
+  #         } else {
+  #           return(NA)
+  #         }
+  # }
+  
+  plot <- df %>%
+              filter(time < 365*5) %>%
+              mutate(years_from_transplant = time/365,
+                     tx_dot = ifelse(years_from_transplant==0, 1, NA),
+                     benefit = S_tx - S_wait) %>%
+              ggplot(aes(x = years_from_transplant)) +
+              geom_ribbon(aes(ymin = S_wait_worse, ymax = S_tx_better, fill = "Survival Benefit"), alpha = 0.5) +
+              geom_step(aes(y = S_tx, color = "Post-Transplant"), size = 1.1) +
+              geom_step(aes(y = S_wait, color = "Waitlist"), size = 1.1) +
+              geom_point(aes(y= tx_dot, shape= "Transplant"), size = 5, colour = "darkgreen") +
+                scale_x_continuous(breaks = seq(0, 5)) + 
+               ggthemes::theme_gdocs() +
+                   labs(y = "Survival", x = "Time (years after transplant)", shape = "") +
+                guides(shape = guide_legend(order = 1), color = guide_legend(order = 2), fill = guide_legend(order = 3))
+  
+  if (output == "plot"){
+      return(plot +
+               scale_color_manual(name = "Survival function", values=c("blue", "red")) +
+               scale_fill_manual(name = NULL, values=c("skyblue")) +
+               lims(y = c(0,1))
+             )
+  }
+  
+  if (output == "plot_w_benefit"){
+      return(plot + 
+               geom_step(aes(y = benefit, color = "Survival benefit"), size = 1.1) + 
+               scale_color_manual(name = "Survival function", values=c("blue", "darkgreen", "red")) +
+               scale_fill_manual(name = NULL, values=c("darkgreen")) 
+             )
+  }
+
+  if (output == "rmst"){
+    rmst_df <-df %>%
+        mutate(days = (S_tx - S_wait)*(time-lag(time)),
+               days = ifelse(row_number() == 1, 0, days),
+         rmst = cumsum(days))
+      return(
+         paste0("DDKT would improve survival by ", round(filter(rmst_df, time == 5*365)$rmst/365, digits = 1), " years on average within the first 5 years following transplant")
+        )
+    }
+  if (output == "table"){
+        benefit_df <- df %>%
+      filter(time %in% c( 365, 3*365, 5*365))
+
+
+    return(
+      benefit_df %>%
+      mutate(S_tx = S_tx,
+             S_wait = S_wait,
+             surv_benefit = S_tx - S_wait,
+             years_from_transplant = time/365) %>%
+      select("Years from transplant" = years_from_transplant,
+             "Survival (transplant)" = S_tx,
+             "Survival (waitlist)" = S_wait,
+             "Absolute Survival Benefit" = surv_benefit) %>%
+          mutate(across(c(2,3,4), percent)) %>%
+        kable()
+      )
+
+  }
+
+}
+```
+
+```{r calculate_5yr_survival_benefits, eval = FALSE}
+l <- list(trans_time <- recips$t_1,
+          ctr <- recips$center,
+          Age <- recips$age,
+          d_time <- recips$dialysis_time_years,
+          diabetes <- recips$diabetes,
+          CAN_PREV_TX <- recips$CAN_PREV_TX,
+          ischemic_time <- recips$ischemic_time,
+          kdpi <- recip_kdpi,
+          output <- rep(1825, length(recips$t_1)))
+
+possibly_sb <- possibly(survival_benefit, 
+                        otherwise = tibble(S_tx = NA, S_wait = NA, benefit = NA) %>%
+                          mutate_all(as.numeric))
+
+recip_5yr <- pmap_dfr(l, possibly_sb)
+write_csv(recip_5yr, file = "five_year_outcomes_derivaion_cohort.csv")
+
+# cur_recips <- read_csv("adult_ddkt_recips_2019.csv")
+# 
+# cur_recip_kdpi <- map_dbl(cur_recips$tx_kdri, KDPI_mapper)
+# 
+# 
+# l_cur <- list(trans_time <- cur_recips$t_1,
+#           ctr <- cur_recips$center,
+#           Age <- cur_recips$age,
+#           d_time <- cur_recips$dialysis_time_years,
+#           diabetes <- cur_recips$diabetes,
+#           CAN_PREV_TX <- cur_recips$CAN_PREV_TX,
+#           ischemic_time <- cur_recips$REC_COLD_ISCH_TM,
+#           kdpi <- cur_recip_kdpi,
+#           output <- rep(1825, length(cur_recips$t_1)))
+# 
+# 
+# cur_recip_5yr <- pmap_dfr(l_cur, possibly_sb)
+# 
+# cur_recip_5yr
+# 
+# write_csv(cur_recip_5yr, file = "five_year_outcomes_2019.csv")
+```
+
+```{r load_5yr_benefits}
+recip_5yr <- read_csv(file = "five_year_outcomes_derivaion_cohort.csv")
+
+#cur_recip_5yr <- read_csv("five_year_outcomes_2019.csv")
+```
+
+```{r recip_df_for_plots}
+to_plot <- recips %>%
+  cbind(recip_5yr) %>%
+  mutate(waitlist_risk = cut(100*(1-S_wait), breaks = seq(0, 100, 1), labels = FALSE),
+         age_floor_25 = ifelse(age <25, 0, age-25),
+         log_dial_time = log(dialysis_time_years + 1),
+         no_dial = ifelse(dialysis_time_years == 0, 1, 0),
+         raw_epts = 0.047*age_floor_25 - 0.015*diabetes*age_floor_25+
+           0.398*CAN_PREV_TX- 0.237*diabetes*CAN_PREV_TX+
+           0.315*log(dialysis_time_years + 1)- 0.099*diabetes*log(dialysis_time_years + 1) +
+           0.130*no_dial - 0.348*no_dial +  
+           1.262*diabetes)
+```
+
+```{r summary_stats_benefit}
+mean_wait <- round(100*summary(to_plot$S_wait)["Mean"][[1]], 1)
+
+mean_post <- round(100*summary(to_plot$S_tx)["Mean"][[1]],1)
+
+mean_benefit <- round(100*summary(to_plot$benefit)["Mean"][[1]],1)
+
+wait_IQR <- paste0(round(100*summary(to_plot$S_wait)[[2]]), "% ,", round(100*summary(to_plot$S_wait)[[5]]), "%")
+
+post_IQR <- paste0(round(100*summary(to_plot$S_tx)[[2]]), ",", round(100*summary(to_plot$S_tx)[[5]]))
+
+benefit_IQR <- paste0(round(100*summary(to_plot$benefit)[[2]]), ",", round(100*summary(to_plot$benefit)[[5]]))
+```
+
+The large long-term risk reduction associated with deceased donor kidney transplantation generated a large improvement in absolute survival. For the N = `r comma(n_recips)` in the study cohort, transplantation was associated with an improvement in estimated 5-year survival from `r mean_wait`% to `r mean_post`%, an absolute benefit of `r mean_benefit`%. This benefit corresponds to one life saved within 5-years for every `r round(1/summary(to_plot$benefit)["Mean"][[1]], 2)` transplants.
+
+There was significant variation in risk of death with and without transplantation by candidate characteristics (see full results of the mixed effects model in **Table S2**). The IQR of survival without a transplant was `r round(100*summary(to_plot$S_wait)[[5]]- 100*summary(to_plot$S_wait)[[2]])`(`r wait_IQR`) and the IQR of post-transplant survival was `r round(100*summary(to_plot$S_tx)[[5]]- 100*summary(to_plot$S_tx)[[2]])`, (`r post_IQR`). There was wide variation in the survival benefit of transplantation, `r round(100*summary(to_plot$benefit)[[5]]- 100*summary(to_plot$benefit)[[2]])`(`r benefit_IQR`)` (**Figure 1**).
+
+```{r lower_upper_IQR_benefit}
+lower_IQR_recip <- to_plot %>%
+  mutate(find_25 = abs(benefit - quantile(to_plot$benefit, na.rm = TRUE, probs = 0.25)[[1]])) %>%
+  arrange(find_25) %>%
+  filter(row_number()  ==1)
+
+upper_IQR_recip <- to_plot %>%
+  mutate(find_75 = abs(benefit - quantile(to_plot$benefit, na.rm = TRUE, probs = 0.75)[[1]])) %>%
+  arrange(find_75) %>%
+  filter(row_number()  ==1)
+
+
+
+```
+
+Survival benefit of deceased donor kidney transplantation for the 25th and 75th percentile recipient. The 25th percentile recipient had an estimated 5-year survival without transplantation of `r round(100*lower_IQR_recip$S_wait)`% which improved to `r round(100*lower_IQR_recip$S_tx)`% with transplantation, an absolute survival benefit of `r round(100*lower_IQR_recip$benefit)`. The 75th percentile recipient had a lower absolute estimated 5-year survival without transplantation `r round(100*upper_IQR_recip$S_wait)`% and with transplantation `r round(100*upper_IQR_recip$S_tx)`%, however a much larger benefit from transplantation `r round(100*upper_IQR_recip$benefit)`%.
+
+```{r}
+max_benefit <- max(to_plot$benefit, na.rm = TRUE)
+
+
+max_waitlist_risk <- round(100*(1-filter(to_plot, benefit == max_benefit)$S_wait))
+
+```
+Overall, there was a strong positive correlation between the risk of death without a transplant (medical urgency) and survival benefit ($\rho=$ `r round(cor(to_plot$benefit, -to_plot$S_wait, use = "complete.obs"), 2)`) (**Figure 2**). The maximum benefit from deceased donor kidney transplantation was a `r round(100*max_benefit)`% absolute improvement in 5-year survival when 5-year mortality without a transplant was was `r max_waitlist_risk`%. This corresponds to a 10 lives saved within 5-years with every `r 10*round(1/max_benefit,1)` transplants. For recipients with expected 5-year mortality without a transplant greater than `r max_waitlist_risk`% the survival benefit declined
+
+
+
+
+
+Candidates at higher risk of death on the without transplantation had a greater benefit from transplantation (**Figure 1**).
+
+The survival benefit of transplantation increased with candidate age, dialysis time, history of diabetes, history of previous transplantation, and decreased with higher ischemic times and donor KDPI.
+
+Survival benefit prediction model is available online at <https://wparker-uchicago.shinyapps.io/DDKT_survival_benefit/>.
+
+```{r, eval = FALSE}
+to_plot %>%
+  mutate(S_wait = cut(100*(S_wait), breaks = seq(0, 100, 1), labels = FALSE)) %>%
+  group_by(S_wait) %>%
+  summarise(benefit = mean(benefit, na.rm = TRUE),
+            S_tx = mean(S_tx, na.rm = TRUE)) %>%
+  mutate(waitlist_risk = 100-S_wait) %>%
+  ggplot(aes(x = waitlist_risk, color = 100*benefit)) + 
+  #geom_linerange() + 
+  geom_segment(aes(xend = waitlist_risk, y = waitlist_risk, yend = 100*(1-S_tx))) + 
+  geom_point(aes(y = waitlist_risk, shape = "Without transplantation")) + 
+  geom_point(aes(y = 100*(1-S_tx), shape = "With transplantation")) +
+  labs(y = "Mortality (%)", x = "Mortality without transplantation (%)", color = "Surival benefit (%)", shape = "Mortality") + scale_shape_manual(values = c(17,16)) +
+  ggthemes::theme_gdocs()
+```
+
+
+
+Survival benefit of deceased donor kidney transplantation by risk of death without a transplant. There is a roughly linear relationship between medical urgency and survival benefit until the most urgent candidates (5-year mortality risk without a transplantation \> 75%). Only for the most extremely urgent candidates (mortality without transplant \> 95%) does the survival benefit of transplantation begin to decline.
+
+```{r, eval = FALSE}
+### Figure: Survival benefit of deceased donor kidney transplantation by estimated post-transplant survival
+to_plot %>%
+  mutate(post_transplant = cut(100*S_tx, breaks = seq(0, 100, 1), labels = FALSE)) %>%
+  group_by(post_transplant) %>%
+  summarise(mean_benefit = mean(benefit, na.rm = TRUE),
+            sd_benefit = sd(benefit, na.rm = TRUE),
+            total_tx = n()) %>%
+  filter(total_tx > 1) %>%
+  mutate(lower_ci = mean_benefit- 1.96*sqrt(sd_benefit/total_tx),
+         upper_ci = mean_benefit + 1.96*sqrt(sd_benefit/total_tx)) %>%
+  #mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes")) %>%
+  ggplot(aes(x = post_transplant, y = 100*mean_benefit, ymin = 100*lower_ci, ymax = 100*upper_ci)) +
+  geom_point() + geom_errorbar() +
+  ggthemes::theme_gdocs() + labs(x = "5-year Estimated Post-transplant Survival", y = "5-year survival benefit") 
+```
+
+
+
+```{r, eval=FALSE}
+to_plot %>%
+  mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes")) %>%
+  ggplot(aes(x = S_tx, y = benefit, fill = diabetes, group = diabetes)) +
+  geom_point()
+```
+
+### Candiate covariates and survival benefit
+
+```{r, eval =FALSE}
+# to_plot %>%
+#   mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes")) %>%
+#   #group_by(diabetes) %>%
+#   # summarise(mean_benefit = mean(recip_5yr),
+#   #           median_benefit = median(recip_5yr)) %>%
+#   ggplot(aes(x = Age, y = recip_5yr, color = diabetes)) + 
+#   geom_point() + 
+#   #
+#   geom_smooth()+
+#   facet_wrap(~ diabetes)
+```
+
+## Between-center variation in the survival benefit
+
+```{r center_vector}
+centers <- rownames(ranef(full_me_model)$center)
+```
+
+```{r}
+l_ctrs_dm <- list(t_transplant <- rep(median_t_transplant, length(centers)),
+                            ctrs <- centers,
+          Age <- rep(median_age, length(centers)),
+          d_time <- rep(median_d_time, length(centers)),
+          diabetes <- rep(1, length(centers)),
+          CAN_PREV_TX <- rep(0, length(centers)),
+          ischemic_time <- rep(median_ischemic_time, length(centers)),
+          kdpi <- rep(median_kdpi, length(centers)),
+          output <- rep(1825, length(centers))
+)
+
+possibly_sb <- possibly(survival_benefit, 
+                        otherwise = tibble(S_tx = NA, S_wait = NA, benefit = NA) %>%
+                          mutate_all(as.numeric))
+
+sb_by_center_dm <- pmap_dfr(l_ctrs_dm, possibly_sb)
+```
+
+The significant between-center variation in waitlist and post-transplant risk (**Figure 1**) translates into significant between-center in the survival benefit of DDKT. **Figure 8** shows case-mix adjusted estimates of the 5-year survival benefit for the N = `r centers %>% length()` DDKT transplantation programs in the US. These estimates are generated by applying the center random effects to the median recipient (see **example 1**) stratifed by diabetes status, generating the survival benefit of a typical US DDKT recipient if they were transplanted at that center.
+
+```{r}
+sb_by_center_dm %>%
+  ggplot(aes(x = S_wait, y = benefit)) + 
+  geom_point()
+```
+
+## Shared-decision making: Take the offer or wait for better?
+
+The decision to take a kidney offer now or wait for a better one depends on all the key variables above. We have developed an online webtool to assist physicians and patients in shared-decision making.
+
+<https://wparker-uchicago.shinyapps.io/DDKT_survival_benefit_compare/>
+
+## Survival benefit by race/ethnicity
+
+```{r summarise_by_race}
+
+# race_means <- recips_current %>%
+#   mutate(age_floor_25 = ifelse(age <25, 0, age-25),
+#          log_dial_time = log(dialysis_time_years + 1),
+#          no_dial = ifelse(dialysis_time_years == 0, 1, 0)) %>%
+#   group_by(race) %>%
+#   mutate(raw_epts = 0.047*age_floor_25 - 0.015*diabetes*age_floor_25+
+#            0.398*CAN_PREV_TX- 0.237*diabetes*CAN_PREV_TX+
+#            0.315*log(dialysis_time_years + 1)- 0.099*diabetes*log(dialysis_time_years + 1) +
+#            0.130*no_dial - 0.348*no_dial +  
+#            1.262*diabetes
+#          ) %>%
+#   select(age, dialysis_time_years, diabetes, CAN_PREV_TX, t_1, raw_epts) %>%
+#   summarise_all(function(x) mean(x, na.rm = TRUE)) %>%
+#   mutate(t_1 = round(t_1))
+# 
+# 
+# race_means %>%
+#   mutate(
+#          diabetes = paste0(round(100*diabetes), "%"),
+#          prev_tx = paste0(round(100*CAN_PREV_TX), "%")) %>%
+#   select("Race"= race, 
+#          "Years on dialysis" = dialysis_time_years, 
+#          "Age" = age, 
+#          "Diabetes" = diabetes,
+#          "History of Previous transplant" = prev_tx,
+#          ) %>%
+#   kbl(digits = 1) %>%
+#   kable_styling(latex_options = c("striped", "scale_down"))
+
+
+race_means_old <- to_plot%>%
+  group_by(race) %>%
+  select(age, dialysis_time_years, diabetes, CAN_PREV_TX, t_1, EPTS, S_wait, S_tx, benefit) %>%
+  summarise_all(function(x) mean(x, na.rm = TRUE)) %>%
+  mutate(t_1 = round(t_1))
+```
+
+
+
+```{r benefit_by_race}
+
+```
+
+
+
+```{r}
+pct <- function(x, q) quantile(x, probs = q)[[1]]
+
+recips_over_time <- read_csv("DDKT_adult_recipients_2010-2020.csv")
+
+race_trends <- recips_over_time %>%
+  mutate(year = year(REC_TX_DT),
+         no_dial = ifelse(dialysis_time_years == 0, 1, 0)) %>%
+  group_by(year, race) %>% 
+  summarise(mean_d_time = mean(dialysis_time_years),
+            median_d_time = median(dialysis_time_years),
+            lower_5 = pct(dialysis_time_years, 0.05),
+            upper_95 = pct(dialysis_time_years, 0.95),
+            lower_25 = pct(dialysis_time_years, 0.25),
+            upper_75 = pct(dialysis_time_years, 0.75),
+            pre_emeptive = mean(no_dial))
+```
+
+
+# Discussion
+
+In this registry cohort analysis, we found large variation in the survival benefit of kidney transplantation between patients. Older patients, patients with more dialysis time, and patients with diabetes are at high risk of death on the wait-list and have greater survival benefit from transplantation. Transplanting patients with higher medical urgency would save more lives than transplanting patients with high estimated post-transplant survival. Recipients in the top 20% EPTS category have lower than average survival benefit within the first 5 years following transplantation. Adjusting for age, non-white recipients have higher risk of death on the wait-list driven by more dialysis time and higher rates of diabetes.
+
+Our
+
+he survival benefit of kidney transplantation varies significantly
+
+Overall, our work is motivated by shifting the focus on of kidney allocation. Deceased donor kidney transplantation save lives can save lives.
+
+## Lives-saved vs. Life-years from transplant (LYFT)
+
+Our estimates the **lives saved** with each transplant over a defined time interval (5 years) instead of the estimating the total "life-years" gained over the length of kidney transplant. This difference in outcome explains why our model identifies different "high benefit" groups than Life-Years From Transplant (LFYT) [@wolfe2008]. There are two main arguments for the Kidney Allocation System to focus on lives-saved (short-term survival benefit) instead of LYFT, one technical and one normative.
+
+First, calculation of LYFT requires estimation of the long-term benefits of kidney transplantation with very limited data. While younger patients have more potential lifespan and therefore theoretically more potential life-years to gain, the actual calculation of LYFT has to rely on long-term extrapolations well beyond the support of the available data. Specifically, Wolfe et al assumed that the relative survival benefit of transplant on the log hazard scale remains constant *even after graft failure*. It is more likely, however, after graft failure the risk of death would regress back to the risk of death on dialysis.
+
+Second, lives-saved on a shorter defined interval better identifies "medically urgent" candidates with high short term benefits from transplantation. The Final Rule does not contain any text about maximizing total quality-adjusted life-years gained by the system, instead saying candidates should be ranked "most to least medically urgent (taking into account...that life sustaining technology allows alternative approaches to setting priority ranking for patients)". We argue short-term survival benefit achieves this aim of the Final Rule, accounting for the risk of death on dialysis while avoiding futile transplants and making "best use of donated organs"
+
+## Racial disparities in survival benefit
+
+Applying our model to deceased donor kidney recipients in 2020, we found that non-white recipients have greater survival benefit compared to age-matched white recipients. This results reflects how the racial disparities in access to transplantation make the system less efficient. Longer dialysis time at listing means non-white candidates are at higher risk of death on the wait-list prior to transplantation. The current kidney allocation system compounds this disparity by prioritizing candidates with less dialysis time via the top 20% EPTS priority for the top 20% KDPI kidneys.
+
+
+# Tables
+
+## Table 1A: Candidate characteristics at time of listing
+
+```{r candidate_table, results = 'asis'}
+tbl_summary(extended_to_model %>% 
+              filter(tx ==0) %>%
+              select(-PX_ID, -PERS_ID, -center, -tx) %>% 
+              mutate("Follow-up time (censored by transplant)" = t_2-t_1) %>% 
+              select("Age" = age,
+                     "Dialysis time (years)" = dialysis_time_years,
+                     "Listed pre-dialysis" = no_dial,
+                     "History of diabetes" = diabetes,
+                     "History of previous organ transplant" = CAN_PREV_TX,
+                     "EPTS % (2019)" = EPTS,
+                     "Race/ethnicity" = race
+                     # "Follow-up time (censored by transplant)",
+                     # "Observed pre-transplant deaths" = dead
+                     )
+) %>% as_flex_table()
+```
+
+## Table 1B: Recipient characteristics at time of transplant
+
+```{r recip_table, results = 'asis'}
+tbl_summary(extended_to_model %>%
+              filter(PX_ID %in% recips$PX_ID & tx ==1) %>%
+              group_by(PX_ID) %>%
+              filter(row_number() == n()) %>%
+              ungroup() %>%
+              left_join(recips %>% select(PX_ID, kdpi)) %>%
+              mutate("Post-transplant follow-up time (years)" = (t_2 - t_1)/365,
+                     "Time on wait-list pre-transplant (years)" = t_1/365)%>% 
+              select("Age" = age,
+                     #"Time on wait-list pre-transplant (years)",
+                     "Dialysis time (years)" = dialysis_time_years,
+                     "History of diabetes" = diabetes,
+                     "History of previous organ transplant" = CAN_PREV_TX,
+                     "EPTS % (2019)" = EPTS,
+                     #"Transplant date range" = REC_TX_DT,
+                     "Waiting time pre-transplant (days)" = t_1,
+                     "KDPI % (2019)" = kdpi,
+                     "Ischemic time (hours)" = ischemic_time,
+                     "Race/ethnicity" = race
+                     #"Post-transplant follow-up time (years)",
+                     #"Observed post-transplant deaths" = dead
+            )) %>%
+  as_flex_table()
+```
+
+
+## Table 2: EPTS characteristics by racial/ethnic group, 2005-2010
+
+```{r epts_characteristics_by_race}
+
+# 
+# 
+# race_means_old %>%
+#   mutate(
+#          diabetes = paste0(round(100*diabetes), "%"),
+#          prev_tx = paste0(round(100*CAN_PREV_TX), "%")) %>%
+#   select("Race"= race, 
+#          "Years on dialysis" = dialysis_time_years, 
+#          "Age" = age, 
+#          "Diabetes" = diabetes,
+#          "History of Previous transplant" = prev_tx,
+#          "EPTS % (2019)" = EPTS,
+#          "Surival without transplant" = S_wait,
+#          "Survival benfit" = benefit
+#          ) %>%
+#   knitr::kable(digits = 2)
+#   #kable_styling(latex_options = c("striped", "scale_down")) %>%
+
+tbl_summary(to_plot%>%
+              mutate("Risk of death without transplant (5-year) %" = 100*(1-S_wait),
+                     "Post-transplant survival (5-year) %" = 100*(S_tx),
+                     ) %>%
+  select("Age" = age , 
+         "Dialysis time (years)" =dialysis_time_years, 
+         "Diabetes" = diabetes, 
+         "History of previous transplant" =CAN_PREV_TX, 
+         "Time to transplant" = t_1, 
+         "Preemptive transplant" = no_dial,
+         #  "KDPI %(2019)" =kdpi,
+         #  "EPTS %(2019)" =EPTS, 
+         # "Risk of death without transplant (5-year) %", 
+         # "Post-transplant survival (5-year) %", 
+         # "Survival Benefit (5-year) %" =benefit, 
+         race), by = race, missing = "no")%>% as_flex_table()
+```
+
+# Figures
+
+## Figure 1: Survival benefit of deceased donor kidney transplantation for the 25th and 75th percentile recipent
+```{r combined_plot}
+
+low_plot <- survival_benefit(lower_IQR_recip$t_1, lower_IQR_recip$center, lower_IQR_recip$age, lower_IQR_recip$dialysis_time_years, lower_IQR_recip$diabetes, lower_IQR_recip$CAN_PREV_TX,
+                 lower_IQR_recip$ischemic_time,
+                 lower_IQR_recip$kdpi)
+
+up_plot <- survival_benefit(upper_IQR_recip$t_1, upper_IQR_recip$center, upper_IQR_recip$age, upper_IQR_recip$dialysis_time_years, upper_IQR_recip$diabetes, upper_IQR_recip$CAN_PREV_TX,
+                 upper_IQR_recip$ischemic_time,
+                 upper_IQR_recip$kdpi)
+
+g_legend<-function(a.gplot){
+tmp <- ggplot_gtable(ggplot_build(a.gplot))
+leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+legend <- tmp$grobs[[leg]]
+return(legend)}
+
+surv_beneift_legend <- g_legend(up_plot + theme(legend.position = "bottom", legend.title = element_blank()))
+
+grid.arrange(arrangeGrob(low_plot + 
+                           theme(legend.position="none",
+                                 title = element_text(size = 8)) +
+                           labs(title =expression(paste(25^th," percentile"))),
+                         up_plot +  
+                           theme(legend.position="none",
+                                 title = element_text(size = 8)) + 
+                           labs(title = expression(paste(75^th," percentile"))),
+                         nrow=1),
+             surv_beneift_legend,
+             nrow=2,heights=c(10, 2.5))
+```
+
+
+## Figure 2: Survival benefit of deceased donor kidney transplantation by risk of death without a transplant
+```{r }
+to_plot %>%
+  mutate(S_wait = cut(100*(S_wait), breaks = seq(0, 100, 1), labels = FALSE)) %>%
+  group_by(S_wait) %>%
+  summarise(benefit = mean(benefit, na.rm = TRUE),
+            S_tx = mean(S_tx, na.rm = TRUE)) %>%
+  mutate(waitlist_risk = 100-S_wait) %>%
+  ggplot(aes(x = waitlist_risk, ymin= S_wait, ymax = 100*S_tx)) + 
+  #geom_linerange() + 
+  geom_segment(aes(xend = waitlist_risk, y = S_wait,  
+                   #color = 100*benefit,
+                   yend = 100*S_tx,
+                   linetype = "Survival benefit")) + 
+  geom_point(aes(y = S_wait, shape = "Without transplantation", color = "Without transplantation"), ) + 
+  geom_point(aes(y = 100*S_tx, shape = "Transplantation", color ="Transplantation")) +
+  labs(y = "Survival (%)", x = "Risk of death within 5-years without a transplant (%)", shape = "", color = "", linetype = "") +
+  scale_shape_manual(values = c(17,16)) +
+  scale_color_manual(values = c("darkgreen", "red")) + 
+  ggthemes::theme_gdocs()
+```
+
+
+## Figure 2 (Alt): Survival benefit of deceased donor kidney transplantation by risk of death without a transplant
+```{r}
+to_plot %>%
+  group_by(waitlist_risk) %>%
+  summarise(mean_benefit = mean(benefit, na.rm = TRUE),
+            median_benefit = median(benefit, na.rm = TRUE),
+            pct_25 = pct(benefit, 0.25),
+            pct_75 = pct(benefit, 0.75),
+            total_tx = n(),
+            sd_benefit = sd(benefit, na.rm = TRUE)) %>%
+  mutate( sd_benefit = sqrt(mean_benefit*(1-mean_benefit))) %>%
+  filter(total_tx > 100) %>%
+  mutate(lower_ci = mean_benefit- 1.96*sqrt(sd_benefit/(total_tx-1)),
+         lower_ci = ifelse(lower_ci < 0, 0, lower_ci),
+         upper_ci = mean_benefit + 1.96*sqrt(sd_benefit/(total_tx-1))) %>%
+  #mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes")) %>%
+  ggplot(aes(x = waitlist_risk, y = 100*mean_benefit, ymin = 100*lower_ci, ymax = 100*upper_ci)) +
+    # ggplot(aes(x = waitlist_risk, y = 100*median_benefit, ymin = 100*pct_25, ymax = 100*pct_75)) +
+  geom_point() + geom_errorbar() +
+  ggthemes::theme_gdocs() + labs(x = "5-year mortality risk without transplant", y = "5-year survival benefit")  + lims(y = c(0, 60))
+```
+
+```{r, eval=FALSE}
+to_plot %>%
+  mutate(S_wait = cut(100*(S_wait), breaks = seq(0, 100, 1), labels = FALSE)) %>%
+  group_by(S_wait) %>%
+  summarise(benefit = mean(benefit, na.rm = TRUE),
+            S_tx = mean(S_tx, na.rm = TRUE)) %>%
+  mutate(waitlist_risk = 100-S_wait) %>%
+  ggplot(aes(x = 100*benefit, ymin= S_wait, ymax = 100*S_tx)) + 
+  #geom_linerange() + 
+  geom_segment(aes(xend = 100*benefit, y = S_wait,  
+                   #color = 100*benefit,
+                   yend = 100*S_tx), alpha = 0.5) + 
+  geom_point(aes(y = S_wait, shape = "Without transplantation", color = "Without transplantation"), ) + 
+  geom_point(aes(y = 100*S_tx, shape = "Transplantation", color ="Transplantation")) +
+  labs(y = "Survival (%)", x = "Survival benefit (%)", shape = "", color = "") +
+  scale_shape_manual(values = c(17,16)) +
+  scale_color_manual(values = c("darkgreen", "red")) + 
+  ggthemes::theme_gdocs()
+```
+
+
+## Figure 3: Survival benefit of deceased donor kidney transplantation by Estimated Post-Transplant Survival (EPTS) percentile
+```{r}
+to_plot %>%
+  group_by(EPTS) %>%
+  summarise(mean_benefit = mean(benefit, na.rm = TRUE),
+            sd_benefit = sd(benefit, na.rm = TRUE),
+            total_tx = n()) %>%
+  filter(total_tx > 1) %>%
+  mutate(lower_ci = mean_benefit- 1.96*sqrt(sd_benefit/total_tx),
+         upper_ci = mean_benefit + 1.96*sqrt(sd_benefit/total_tx),
+         top_20 = ifelse(EPTS < 21, "Top 20%", ">20%")) %>%
+  #mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes")) %>%
+  ggplot(aes(x = EPTS, y = 100*mean_benefit, ymin = 100*lower_ci, ymax = 100*upper_ci, color = top_20)) +
+  geom_point() + geom_errorbar() +
+  ggthemes::theme_gdocs() +
+  labs(x = "EPTS % (2019)", y = "Survival Benefit (5-year)", color = "EPTS group")
+```
+Survival benefit of deceased donor kidney transplantation by Estimated Post-Transplant Survival (EPTS) percentile (2019 OPTN mapping table). The candidates in the top 20% EPTS (highest expected post-transplant survival) have significantly lower benefit from transplantation when compared to candidates with EPTS \> 20%.
+
+
+
+## Figure 4: Trends in median dialysis time by race/ethnicity
+
+```{r plot_median_dialysis_trend}
+race_trends %>%
+  ggplot(aes(x = year, y = median_d_time*365, color = race)) +
+  geom_vline(aes(xintercept = 2014.463, linetype ="KAS implemented")) + 
+  geom_line() + geom_point() + 
+  #geom_errorbar() + 
+  scale_linetype_manual(values = "dashed") + 
+  ggthemes::theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) + 
+  labs(color = "Race/Ethnicity", linetype = "", y = "Median dialysis time (years) at transplant", x = "Year") + 
+  lims(y = c(0,7)) + scale_y_continuous(breaks =seq(0, 4000, 1000)) +
+  scale_x_continuous(breaks = seq(2010, 2020)) + lims(y = c(0,4000))
+
+```
+
+Trends in the median dialysis time at transplant by race/ethnicity. Despite the decemeber 2014 change to give candidates credit for pre-listing dialysis time, a large (>2 year) disparity in dialysis time at transplant persists through 2020.
+
+## Figure 5: Trends in preemptive transplants by race/ethnicity
+
+```{r plot_preemptive_trend}
+race_trends %>%
+  ggplot(aes(x = year, y = 100*pre_emeptive, color = race)) +
+  geom_vline(aes(xintercept = 2014.463, linetype ="KAS implemented")) + 
+  geom_line() + geom_point() + 
+  #geom_errorbar() + 
+  scale_linetype_manual(values = "dashed") + 
+  ggthemes::theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) + 
+  labs(color = "Race/Ethnicity", linetype = "", y = "Adult pre-emeptive transplants (%)", x = "Year") + 
+  scale_x_continuous(breaks = seq(2010, 2020))
+```
+
+Proportion of deceased donor kidney transplants performed preemptively (before the initiation of dialysis) by race/ethnicity over time, as first reported by @King2019.
+
+
+
+
+# References
+
+
+
+
