@@ -4,12 +4,12 @@ author: "William F Parker, MD, MS,^1^, Yolanda Becker MD^1^, Robert Gibbons, PhD
 date: "^1^University of Chicago"
 thanks: "A commissioned paper for the National Academies of Sciences, Engineering, and Medicine study committee: A Fairer and More Equitable Cost-Effective and Transparent System of Donor Organ Procurement, Allocation, and Distribution. June, 2021"
 output:
-  word_document:
-    reference_docx: word_style_times_new_roman_1.docx
   pdf_document:
     latex_engine: xelatex
     toc: yes
     toc_depth: 2
+  word_document:
+    reference_docx: word_style_times_new_roman_1.docx
   html_notebook:
     theme: journal
     toc: yes
@@ -105,15 +105,13 @@ To calculate the absolute estimated survival with and without transplantation, w
 
 We determined the association of 5-year mortality without transplant (medical urgency as estimated by the model) and the OTPN Estimated Post-Transplant Survival score (2019 EPTS percentiles) with survival benefit. To specifically evaluate the compliance of the top 20% KDPI to top 20% EPTS policy with the Final Rule, we compared the the survival benefit of a 15% KPDI donor kidney to a 60% KDPI donor kidney by EPTS score. Finally, we determined the association between the candidate variables that compose EPTS (age, dialysis, history of diabetes, and history of previous transplantation) with survival benefit.
 
-
 ## Association of transplant center with survival benefit
 
 Following the approach employed by the Center for Medicare and Medicaid Services [@krumholz2006; @shahian2005], we used the empirical Bayes estimates of each center's intercept and transplant effect to calculate the average survival benefit across kidney transplant programs, case-mix adjusting for donor variables. Specifically, we estimated the survival benefit of deceased donor kidney transplantation at each center at KDPI 15%, median KDPI, and KDPI 60% (with median ischemic time). We did not case-mix adjust for candidate covariates because transplant programs are responsible for selecting candidates for the wait-list from a incredibly large pool of potential candidates for transplantation [@Saran2020].
 
-
 ## Shared-decision making offer comparision tool
 
-When considering a deceased donor kidney offer, the proper counter-factual is not waiting indefinitely on dialysis without transplantation. Turning down a particular kidney does not may give a candidate the ability to accept a subsequent offer for a better graft, assuming they survive to receive the next offer. Therefore we applied our model to construct the estimated survival function for waiting a designated period of time before receiving a deceased donor kidney transplant (see **Supplement** for details)
+When considering a deceased donor kidney offer, the proper counter-factual is not waiting indefinitely on dialysis without transplantation. Turning down a particular kidney may give a candidate the ability to accept a subsequent offer for a better graft, assuming they survive to receive the next offer. Therefore we applied our model to construct the estimated survival function for waiting a designated period of time before receiving a deceased donor kidney transplant (see **Supplement** for details)
 
 ## Association of race/ethnicity with survival benefit
 
@@ -289,8 +287,8 @@ median_ischemic_time <- mean(recips$ischemic_time, na.rm = TRUE)
 median_kdpi <- median(recip_kdpi, na.rm = TRUE)
 ```
 
-
 ## The survival benefit of deceased donor kidney transplantation over time
+
 ```{r identify_model}
 i_time_cuts <- quantile(recips$ischemic_time, na.rm = TRUE, probs = c(0.25, 0.75))
 full_me_model <- me_models[[1]]
@@ -696,9 +694,10 @@ post_IQR <- paste0(round(100*summary(to_plot$S_tx)[[2]]), "% ,", round(100*summa
 benefit_IQR <- paste0(round(100*summary(to_plot$benefit)[[2]]), "% ,", round(100*summary(to_plot$benefit)[[5]]), "%")
 ```
 
-The large long-term risk reduction associated with deceased donor kidney transplantation led a large absolute survival benefit by 5-years. For the N = `r comma(n_recips)` in the study cohort, transplantation was associated with an improvement in estimated 5-year survival from `r mean_wait`% to `r mean_post`%, an absolute benefit of `r mean_benefit`%. This benefit corresponds to one life saved within 5-years for every `r round(1/summary(to_plot$benefit)["Mean"][[1]], 2)` transplants.
+The large long-term risk reduction associated with deceased donor kidney transplantation led to a large absolute survival benefit by 5-years. For the N = `r comma(n_recips)` in the study cohort, transplantation was associated with an improvement in estimated 5-year survival from `r mean_wait`% to `r mean_post`%, an absolute benefit of `r mean_benefit`%. This benefit corresponds to one life saved within 5-years for every `r round(1/summary(to_plot$benefit)["Mean"][[1]], 2)` transplants.
 
 ## The association of survival benefit with medical urgency and Estimated Post-Transplant Survival (EPTS)
+
 ```{r lower_upper_IQR_benefit}
 lower_IQR_recip <- to_plot %>%
   mutate(find_25 = abs(benefit - quantile(to_plot$benefit, na.rm = TRUE, probs = 0.25)[[1]])) %>%
@@ -719,7 +718,7 @@ max_waitlist_risk <- round(100*(1-filter(to_plot, benefit == max_benefit)$S_wait
 
 There was wide variation in the survival benefit of transplantation (IQR `r benefit_IQR`), driven by significant variation in risk of death with and without transplantation by candidate characteristics (**Table S2**). The 25th percentile recipient by survival benefit had an estimated 5-year survival without transplantation of `r round(100*lower_IQR_recip$S_wait)`% which improved to `r round(100*lower_IQR_recip$S_tx)`% with transplantation, an absolute survival benefit of `r round(100*lower_IQR_recip$benefit)`%. The 75th percentile recipient had a lower absolute estimated 5-year survival without transplantation `r round(100*upper_IQR_recip$S_wait)`% and with transplantation `r round(100*upper_IQR_recip$S_tx)`%, however a much larger benefit from transplantation `r round(100*upper_IQR_recip$benefit)`% (**Figure 1**)
 
-Overall, there was a strong positive correlation between the risk of death without a transplant (medical urgency) and survival benefit ($\rho=$ `r round(cor(to_plot$benefit, -to_plot$S_wait, use = "complete.obs"), 2)`) (**Figure 2**). The maximum benefit from deceased donor kidney transplantation was a `r round(100*max_benefit)`% absolute improvement in 5-year survival when 5-year mortality without a transplant was was `r max_waitlist_risk`%. This corresponds to a 10 lives saved with every `r 10*round(1/max_benefit,1)` transplants (within the first 5-years). For recipients with expected 5-year mortality without a transplant greater than `r max_waitlist_risk`% the survival benefit declined, driven by very low expected post-transplant survival.
+Overall, there was a strong positive correlation between the risk of death without a transplant (medical urgency) and survival benefit ($\rho=$ `r round(cor(to_plot$benefit, -to_plot$S_wait, use = "complete.obs"), 2)`) (**Figure 2**). The maximum benefit from deceased donor kidney transplantation was a `r round(100*max_benefit)`% absolute improvement in 5-year survival when 5-year mortality without a transplant was was `r max_waitlist_risk`%. This corresponds to a 10 lives saved with every `r 10*round(1/max_benefit,1)` transplants (within the first 5-years). 
 
 ```{r donor_adjusted_benefits, eval=FALSE}
 # set ischemic time and KDPI to the median, keep other candidate characteristics the same
@@ -815,7 +814,7 @@ EPTS_benefit_table <- to_plot %>%
 
 There was a strong correlation between EPTS score (2019 %) and survival benefit (`r round(cor(to_plot$EPTS, to_plot$benefit, use = "complete.obs"), 2)`), meaning that recipients with low EPTS % had *lower* survival benefit (**Table 2**). There was a strong correlation between EPTS scores and 5-year mortality without transplantation `r round(cor(to_plot$EPTS, -to_plot$S_wait, use = "complete.obs"), 2)`, meaning recipients with lower EPTS % tended to be less medically urgent.
 
-There was a significant interaction between EPTS and KDPI. Top 20% EPTS recipients (currently receive priority for Top 20% kidneys) gain a `r as.numeric(EPTS_benefit_table[1,2])`% improvement in 5-year survival with a KDPI 15% kidney compared to a `r as.numeric(EPTS_benefit_table[1,3])`% improvement with a KDPI 60% kidney. In contrast, a recipients in the highest risk quartile (EPTS 80-100%) gain `r as.numeric(EPTS_benefit_table[5,2])`% in 5-year survival with a KDPI 15% kidney compared to `r as.numeric(EPTS_benefit_table[5,3])`% with a KDPI 60%, a significantly greater benefit from the higher quality graft (p< 0.01).
+There was a significant interaction between EPTS and KDPI. Top 20% EPTS recipients (currently receive priority for Top 20% kidneys) gain a `r as.numeric(EPTS_benefit_table[1,2])`% improvement in 5-year survival with a KDPI 15% kidney compared to a `r as.numeric(EPTS_benefit_table[1,3])`% improvement with a KDPI 60% kidney. In contrast, a recipients in the highest risk quartile (EPTS 80-100%) gain `r as.numeric(EPTS_benefit_table[5,2])`% in 5-year survival with a KDPI 15% kidney compared to `r as.numeric(EPTS_benefit_table[5,3])`% with a KDPI 60%, a significantly greater benefit from the higher quality graft (p\< 0.01).
 
 ```{r average_benefit_covariates}
 linear_model <- lm(benefit ~ age + dialysis_time_years + no_dial + diabetes + CAN_PREV_TX + kdpi + ischemic_time, to_plot)
@@ -830,7 +829,7 @@ dial_year_effect <- as.numeric(round(100*linear_model$coefficients["dialysis_tim
 preemptive_effect <- as.numeric(round(100*linear_model$coefficients["no_dial"], 1))
 ```
 
-All candidate covariates that generate higher EPTS scores (Age, history of diabetes, dialysis time, and history of previous transplant) were associated with greater medical urgency and had strong, independent associations with survival benefit (**Table S2**). On average, each year of recipient age increased 5-year survival benefit by `r year_age_effect`%, a history of previous solid organ transplant by `r hx_prev_effect`%, and a history of diabetes by `r diabetes_effect`%. Each additional year on dialysis increased 5-year survival benefit by `r dial_year_effect`%. Preemptive transplants were associated with `r preemptive_effect`% less survival benefit at 5-years. The full survival benefit prediction model is available online at <https://wparker-uchicago.shinyapps.io/DDKT_survival_benefit/>.
+All candidate covariates that generate higher EPTS scores (age, history of diabetes, dialysis time, and history of previous transplant) were associated with greater medical urgency and had strong, independent associations with survival benefit (**Table S2**). On average, each year of recipient age increased 5-year survival benefit by `r year_age_effect`%, a history of previous solid organ transplant by `r hx_prev_effect`%, and a history of diabetes by `r diabetes_effect`%. Each additional year on dialysis increased 5-year survival benefit by `r dial_year_effect`%. Preemptive transplants were associated with `r preemptive_effect`% less survival benefit at 5-years. The full survival benefit prediction model is available online at <https://wparker-uchicago.shinyapps.io/DDKT_survival_benefit/>.
 
 ## Between-center variation in the survival benefit
 
@@ -954,9 +953,9 @@ diff_15_60 <- round(100*mean(diff_vector, na.rm =TRUE), 1)
 diff_iqr <- iqr(diff_vector,1)
 ```
 
-There were large, statistically significant transplant center effects on the risk of death with and without transplantation (see **Table S2B** for center effects on log hazard scale). The average 5-year risk of death without a transplant ranged from `r min_ctr_wait`% to `r max_ctr_wait` (IQR [`r wait_list_iqr_center`%]). There was less between-center variation in the average 5-year post-transplant survival with a median KDPI kidney (`r median_kdpi`%), ranging from `r min_ctr_post`% to `r max_ctr_post`% (IQR [`r post_list_iqr_center`%]). The correlation between average center risk of death with and without transplantation was strongly positive ($\rho$ = `r round(corr_wait_post, 2)`).
+There were large, statistically significant transplant center effects on the risk of death with and without transplantation (see **Table S2B** for center effects on log hazard scale). The average 5-year risk of death without a transplant ranged from `r min_ctr_wait`% to `r max_ctr_wait`% (IQR [`r wait_list_iqr_center`%]). There was less between-center variation in the average 5-year post-transplant survival with a median KDPI kidney (`r median_kdpi`%), ranging from `r min_ctr_post`% to `r max_ctr_post`% (IQR [`r post_list_iqr_center`%]). The correlation between average center risk of death with and without transplantation was strongly positive ($\rho$ = `r round(corr_wait_post, 2)`).
 
-The significant between-center variation in the risk of death with and without transplantation and translates into significant between-center in the survival benefit of DDKT (**Figure 4**). The 5-year improvement in associated with a median KDPI (`r median_kdpi`%) donor kidney varied from `r min_benefit`% to `r max_benefit`% (IQR `r benefit_iqr_center`%). In contrast, the average improvement in survival benefit of a KDPI 15% kidney compared to a KDPI 60% kidney was only `r diff_15_60` (IQR `r diff_iqr`%).
+The significant between-center variation in the risk of death with and without transplantation and translates into significant between-center in the survival benefit of DDKT (**Figure 4**). The 5-year improvement in associated with a median KDPI (`r median_kdpi`%) donor kidney varied from `r min_benefit`% to `r max_benefit`% (IQR `r benefit_iqr_center`%). In contrast, the average improvement in survival benefit of a KDPI 15% kidney compared to a KDPI 60% kidney was only `r diff_15_60`% (IQR `r diff_iqr`%).
 
 ## Shared-decision making: Take the offer or wait for a better one?
 
@@ -1161,7 +1160,6 @@ white_means_old <- to_plot%>%
   summarise_all(function(x) mean(x, na.rm = TRUE)) %>%
   mutate(t_1 = round(t_1))
 
-white_means_old$no_dial
 
 white_median_old <- to_plot%>%
   mutate(White = ifelse(race == "White", race, "Non-White")) %>%
@@ -1169,11 +1167,9 @@ white_median_old <- to_plot%>%
   select(age, dialysis_time_years, diabetes, CAN_PREV_TX, t_1, EPTS, S_wait, S_tx, benefit) %>%
   summarise_all(function(x) median(x, na.rm = TRUE)) %>%
   mutate(t_1 = round(t_1))
-
-filter(white_median_old, White == "Non-White")$t_1
 ```
 
-Summary statistics for key model variables by race/ethnicity can be found in **Table 3**. For adult candidate listed 2005-2010, the median white recipients waited `r filter(white_median_old, White == "White")$t_1` days for transplantation compared `r filter(white_median_old, White == "Non-White")$t_1` days for the median non-white recipient, `r filter(white_median_old, White == "Non-White")$t_1- filter(white_median_old, White == "White")$t_1` days longer (p<0.01). White recipients were more likely to transplanted preemptively (`r round(100*filter(white_means_old, White == "White")$no_dial, 1)`% vs. `r round(100*filter(white_means_old, White == "Non-white")$no_dial, 1)`%, p < 0.01) and the median recipient waited `r filter(white_median_old, White == "Non-White")$dialysis_time_years - filter(white_median_old, White == "White")$dialysis_time_years` fewer years on dialysis prior to transplantation (`r filter(white_median_old, White == "White")$dialysis_time_years` vs. `r `filter(white_median_old, White == "Non-White")$dialysis_time_years`, p < 0.01).
+Summary statistics for key model variables by race/ethnicity can be found in **Table 3**. For adult candidate listed 2005-2010, the median white recipients waited `r filter(white_median_old, White == "White")$t_1` days for transplantation compared `r filter(white_median_old, White == "Non-White")$t_1` days for the median non-white recipient, `r filter(white_median_old, White == "Non-White")$t_1- filter(white_median_old, White == "White")$t_1` days longer (p\<0.01). White recipients were more likely to transplanted preemptively (`r round(100*filter(white_means_old, White == "White")$no_dial, 1)`% vs. `r round(100*filter(white_means_old, White == "Non-white")$no_dial, 1)`%, p \< 0.01) and the median recipient waited `r round(filter(white_median_old, White == "Non-White")$dialysis_time_years - filter(white_median_old, White == "White")$dialysis_time_years, 1)` fewer years on dialysis prior to transplantation (`r round(filter(white_median_old, White == "White")$dialysis_time_years, 1)` vs. `r round(filter(white_median_old, White == "Non-White")$dialysis_time_years, 1)`, p \< 0.01).
 
 ```{r benefit_by_race}
 
@@ -1208,7 +1204,7 @@ age_adjusted_rates_by_race <- to_plot %>%
          "Mortality without transplant %" = 100*(1-mean_wait))
 ```
 
-After age-adjustment, the average white recipient in our cohort had a 5-year survival benefit `r round(100*filter(age_adjusted_rates_by_race, race == "White")$mean_benefit,1)`%, significantly lower than Black recipients (`r round(100*filter(age_adjusted_rates_by_race, race == "Black")$mean_benefit,1)`%), Hispanic recipients (`r round(100*filter(age_adjusted_rates_by_race, race == "Hispanic/Latino")$mean_benefit,1)`%), and Asian/pacific islander recipients (`r round(100*filter(age_adjusted_rates_by_race, race == "Asian/Pacific Islander")$mean_benefit,1)`%) (p<0.01) for all comparisons.
+After age-adjustment, the average white recipient in our cohort had a 5-year survival benefit `r round(100*filter(age_adjusted_rates_by_race, race == "White")$mean_benefit,1)`%, significantly lower than Black recipients (`r round(100*filter(age_adjusted_rates_by_race, race == "Black")$mean_benefit,1)`%), Hispanic recipients (`r round(100*filter(age_adjusted_rates_by_race, race == "Hispanic/Latino")$mean_benefit,1)`%), and Asian/pacific islander recipients (`r round(100*filter(age_adjusted_rates_by_race, race == "Asian/Pacific Islander")$mean_benefit,1)`%) (p\<0.01) for all comparisons.
 
 ```{r race_trends_df}
 recips_over_time <- read_csv("DDKT_adult_recipients_2010-2020.csv")
@@ -1226,21 +1222,19 @@ race_trends <- recips_over_time %>%
             pre_emeptive = mean(no_dial))
 ```
 
-Compared to the study cohort, racial disparities in dialysis time persisted (**Figure 6**). In 2013, the median dialysis time for a White recipient was `r round(filter(race_trends, race == "White" & year ==2013)$median_d_time, 1)` years compared to `r round(filter(race_trends, race == "Black" & year ==2013)$median_d_time, 1)` years for Black recipients. In 2019, the median dialysis time for a White recipient was `r round(filter(race_trends, race == "White" & year ==2019)$median_d_time, 1)` years compared to `r round(filter(race_trends, race == "Black" & year ==2019)$median_d_time, 1)` years for Black recipients.  The disparity in preemptive transplants increased (**Figure 7**).  In 2013, `r round(100*filter(race_trends, race == "White" & year ==2013)$pre_emeptive)`% of White recipients received a preemptive transplant compared to `r round(100*filter(race_trends, race == "Black" & year ==2013)$pre_emeptive)`% of Black recipients.  In 2019, `r round(100*filter(race_trends, race == "White" & year ==2019)$pre_emeptive)`% of White recipients received a preemptive transplant compared to `r round(100*filter(race_trends, race == "Black" & year ==2019)$pre_emeptive)`% of Black recipients.
+Racial disparities in dialysis time persisted from 2010-2020 despite the implementation of KAS in 2014 (**Figure 6**). In 2013, the median dialysis time for a White recipient was `r round(filter(race_trends, race == "White" & year ==2013)$median_d_time, 1)` years compared to `r round(filter(race_trends, race == "Black" & year ==2013)$median_d_time, 1)` years for Black recipients. In 2019, the median dialysis time for a White recipient was `r round(filter(race_trends, race == "White" & year ==2019)$median_d_time, 1)` years compared to `r round(filter(race_trends, race == "Black" & year ==2019)$median_d_time, 1)` years for Black recipients. The disparity in preemptive transplants increased (**Figure 7**). In 2013, `r round(100*filter(race_trends, race == "White" & year ==2013)$pre_emeptive)`% of White recipients received a preemptive transplant compared to `r round(100*filter(race_trends, race == "Black" & year ==2013)$pre_emeptive)`% of Black recipients. In 2019, `r round(100*filter(race_trends, race == "White" & year ==2019)$pre_emeptive)`% of White recipients received a preemptive transplant compared to `r round(100*filter(race_trends, race == "Black" & year ==2019)$pre_emeptive)`% of Black recipients.
 
 # Discussion
 
 In this registry cohort analysis, we found large variation in the survival benefit of kidney transplantation between patients. Older patients, patients with more dialysis time, and patients with diabetes are at high risk of death on the wait-list and have greater survival benefit from transplantation. Transplanting patients with higher medical urgency would save more lives than transplanting patients with high estimated post-transplant survival. Recipients in the top 20% EPTS category have lower than average survival benefit within the first 5 years following transplantation. Within 5-years, candidates are typically better off taking a higher KDPI kidney when offered compared to waiting for a lower KDPI graft. Adjusting for age, non-white recipients have higher risk of death on the wait-list driven by more dialysis time and higher rates of diabetes.
 
+## Implications for top 20% EPTS priority
 
-## Implications for top 20% EPTS priority 
-
-Dialysis may be a life-sustaining alternative therapy, but it is far from perfect. The finding that high quality kidneys from top 20% KDPI donors confer *more* survival benefit to medically urgent candidates is consistent with prior results [@bae2019] and has immediate policy implications. The current policy of prioritizing the top 20% KDPI kidneys for the top 20% EPTS candidates is inefficient with respect to saving lives, as those kidneys would save more lives if allocated to higher risk candidates. While maximizing graft survival is an ethically important consideration, the Final Rule indicates that saving lives by transplanting medically urgent candidates is *at least* as important as total graft years. 
-
+Dialysis may be a life-sustaining alternative therapy, but it is far from perfect. The finding that high quality kidneys from top 20% KDPI donors confer *more* survival benefit to medically urgent candidates is consistent with prior results [@bae2019] and has immediate policy implications. The current policy of prioritizing the top 20% KDPI kidneys for the top 20% EPTS candidates is inefficient with respect to saving lives, as those kidneys would save more lives if allocated to higher risk candidates. While maximizing graft survival is an ethically important consideration, the Final Rule indicates that saving lives by transplanting medically urgent candidates is *at least* as important as total graft years.
 
 ## Lives-saved vs. Life-years from transplant (LYFT)
 
-Our estimates the **lives saved** with each transplant over a defined time interval (5 years) instead of the estimating the total "life-years" gained over the length of kidney transplant. This difference in outcome explains why our model identifies different "high benefit" groups than Life-Years From Transplant (LFYT) [@wolfe2008]. There are two main arguments for the Kidney Allocation System to focus on lives-saved (short-term survival benefit) instead of LYFT, one technical and one normative.
+Our approach estimates the **lives saved** with each transplant over a defined time interval (5 years) instead of the estimating the total "life-years" gained over the length of kidney transplant. This difference in outcome explains why our model identifies different "high benefit" groups than Life-Years From Transplant (LFYT) [@wolfe2008]. There are two main arguments for the Kidney Allocation System to focus on lives-saved (short-term survival benefit) instead of LYFT, one technical and one normative.
 
 First, calculation of LYFT requires estimation of the long-term benefits of kidney transplantation with very limited data. While younger patients have more potential lifespan and therefore theoretically more potential life-years to gain, the actual calculation of LYFT has to rely on long-term extrapolations well beyond the support of the available data. Specifically, Wolfe et al assumed that the relative survival benefit of transplant on the log hazard scale remains constant *even after graft failure*. It is more likely, however, after graft failure the risk of death would regress back to the risk of death on dialysis.
 
@@ -1254,9 +1248,7 @@ The persistent racial disparities in preemptive transplantation and median dialy
 
 ## Limitations
 
-Our model had a c-statistic of 0.69, which can be interpreted as good but not excellent discrimination, which suggests it should not be used as the only candidate ranking criterion in the kidney allocation system. Limiting the covariates to those currently used in the Kidney Allocation System may have reduced model performance. However, the model has the same accuracy as the EPTS model while predicting risk in 4 distinct time periods [@eptscal]. Therefore, our survival benefit estimates could be used to balance medical urgency with other ethically relevant factors in scarce resource allocation 
-
-We restricted the covariates used in our model to those current active in the Kidney Allocation System. This may have limited our model's predictive accuracy, 
+Our model had a c-statistic of 0.69, which can be interpreted as good but not excellent discrimination, which suggests it should not be used as the only candidate ranking criterion in the kidney allocation system. Limiting the covariates to those currently used in the Kidney Allocation System may have reduced model performance. However, the model has the same accuracy as the EPTS model while predicting risk in 4 distinct time periods [@eptscal]. Therefore, our survival benefit estimates could be used to balance medical urgency with other ethically relevant factors in scarce resource allocation
 
 Our center estimates are not case-mix adjusted for observed candidate covariates to reflect center selection practices, however the prevalence of chronic kidney disease and demographics of potential candidates does vary considerably across the country [@Saran2020], so adjustment for certain candidate covariates (specifically age) may be appropriate.
 
@@ -1266,7 +1258,7 @@ We focused on 5-year survival benefit in this study to demonstrate the large mag
 
 ## Conclusion
 
-Deceased donor kidney transplant candidates have widely varying risk of death on without a transplant. The current Kidney Allocation System ignores the Final Rule requirements to rank order candidates by medical urgency. Severe racial/ethnic disparities persist within deceased donor kidney allocation which should be directly addressed by policy changes such as eliminating pre-dialysis waiting time points. With a focus on survival benefit, deceased donor kidney transplantation can save more lives.
+Deceased donor kidney transplant candidates have widely varying risk of death without a transplant. The current Kidney Allocation System ignores the Final Rule requirements to rank order candidates by medical urgency. Severe racial/ethnic disparities persist within deceased donor kidney allocation which should be directly addressed by policy changes such as eliminating pre-dialysis waiting time points. With a focus on survival benefit, deceased donor kidney transplantation can save more lives.
 
 # Tables
 
@@ -1289,7 +1281,7 @@ tbl_summary(extended_to_model %>%
                      # "Follow-up time (censored by transplant)",
                      # "Observed pre-transplant deaths" = dead
                      )
-) %>% as_flex_table()
+) %>% as_gt()
 ```
 
 ## Table 1B: Recipient characteristics at time of transplant
@@ -1320,17 +1312,19 @@ tbl_summary(extended_to_model %>%
                      "Race/ethnicity" = race
                      #"Post-transplant follow-up time (years)",
                      #"Observed post-transplant deaths" = dead
-            )) %>%
-  as_flex_table()
+            )) %>% as_gt()
 ```
 
+\pagebreak
 ## Table 2: Survival benefit by EPTS quintile
 
 ```{r benefit_by_EPTS_table}
 EPTS_benefit_table %>%
-  kable()
+  kable(digits = 1) %>%
+  kableExtra::kable_styling()
 ```
 
+\pagebreak
 ## Table 3: EPTS characteristics by racial/ethnic group, 2005-2010
 
 ```{r epts_characteristics_by_race}
@@ -1356,10 +1350,10 @@ tbl_summary(to_plot%>%
                      ) %>%
               filter(race != "Other") %>%
   select("Age" = age , 
-         "History of previous transplant" =CAN_PREV_TX, 
+         "Previous transplant" =CAN_PREV_TX, 
          "Diabetes" = diabetes, 
-         "Dialysis time prior to transplant (years)" =dialysis_time_years, 
-         "Wait list time prior to transplant" = t_1, 
+         "Dialysis (years)" =dialysis_time_years, 
+         "Wait list time" = t_1, 
          "Preemptive transplant" = no_dial,
           #"KDPI %(2019)" =kdpi,
          #  "EPTS %(2019)" =EPTS, 
@@ -1367,10 +1361,13 @@ tbl_summary(to_plot%>%
          # "Post-transplant survival (5-year) %", 
          # "Survival Benefit (5-year) %" =benefit, 
          race), by = race, missing = "no")%>% 
-  as_flex_table()
+  as_kable_extra(booktabs = TRUE) %>%
+  kableExtra::kable_styling(font_size = 7)
 ```
 
+\pagebreak
 ## Table 4: Age-adjusted 5-year mortality without a transplant and survival benefit by racial/ethnic group
+
 ```{r}
 age_adjusted_rates_by_race %>%
   arrange(-mean_benefit) %>%
@@ -1378,10 +1375,13 @@ age_adjusted_rates_by_race %>%
   select("Race/ethnicity" = race,
          "Mortality without transplant %",
          "Survival benefit %") %>%
-  kable(digits = 1) 
+  kable(digits = 1) %>%
+  kableExtra::kable_styling()
 ```
+
 5-year mortality without a transplant (medical urgency) and survival benefit for first time deceased donor kidney transplant recipients by race/ethnicity, age-adjusted using direct-standardization with age bins of (0,30), (30,40), (40,50), (50,60), (70+).
 
+\pagebreak
 # Figures
 
 ## Figure 1: Survival benefit of deceased donor kidney transplantation for the 25th and 75th percentile recipent
