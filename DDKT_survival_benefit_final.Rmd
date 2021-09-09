@@ -3,14 +3,14 @@ title: "Saving More Lives with Deceased Donor Kidney Transplantation"
 author: "William F Parker, MD, PhD,^1^, Yolanda Becker MD^1^, Robert D Gibbons, PhD^1^" 
 date: "^1^University of Chicago"
 output:
+  word_document:
+    reference_docx: word_style_times_new_roman_1.docx
   pdf_document:
     latex_engine: xelatex
     keep_tex: true
     includes:
       in_header: "preamble.tex"
     #citation_package: natbib
-  word_document:
-    reference_docx: word_style_times_new_roman_1.docx
   html_notebook:
     theme: journal
     toc: yes
@@ -19,6 +19,7 @@ output:
 bibliography: references.bib
 csl: national-academy-science-letters.csl
 urlcolor: blue
+always_allow_html: true
 ---
 
 ```{r packages, echo=FALSE, cache=FALSE, include=FALSE}
@@ -602,6 +603,7 @@ survival_benefit <-  function(t_transplant,
                               b_hazard = full_base_hz,
                               post_tx_int_1 = 30,
                               post_tx_int_2 = 180){
+
   
   log_hr_w <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
                                      model = me_model, icuts = isch_cuts, period = "wait")
@@ -719,16 +721,28 @@ survival_benefit <-  function(t_transplant,
       mutate(S_tx = S_tx,
              S_wait = S_wait,
              surv_benefit = S_tx - S_wait,
-             years_from_transplant = time/365) %>%
+             years_from_transplant = time/365,
+             LiST = round(surv_benefit,2)) %>%
       select("Years from transplant" = years_from_transplant,
              "Survival (transplant)" = S_tx,
              "Survival (waitlist)" = S_wait,
-             "Absolute Survival Benefit" = surv_benefit) %>%
+             "Absolute Survival Benefit" = surv_benefit,
+             "LiST" = LiST) %>%
           mutate(across(c(2,3,4), percent)) %>%
         kable()
       )
 
   }
+  
+    if (output == "list_5"){
+      list_5 <- df %>%
+        mutate(benefit = S_tx - S_wait) %>%
+        filter(time == 5*365)
+      
+      return(
+          round(list_5$benefit, digits = 2)
+        )
+    }
 
 }
 ```
@@ -823,16 +837,24 @@ upper_IQR_recip <- to_plot %>%
   arrange(find_75) %>%
   filter(row_number()  ==1)
 
-max_benefit <- max(to_plot$benefit, na.rm = TRUE)
+#max_benefit <- max(to_plot$benefit, na.rm = TRUE)
 
-max_waitlist_risk <- round(100*(1-filter(to_plot, benefit == max_benefit)$S_wait))
+#max_waitlist_risk <- round(100*(1-filter(to_plot, benefit == max_benefit)$S_wait))
 
 #The IQR of five-year survival without a transplant was (`r wait_IQR`) and the IQR of post-transplant survival was (`r post_IQR`). 
 ```
 
 There was wide variation in the survival benefit of transplantation (IQR `r benefit_IQR`), driven by significant variation in risk of death with and without transplantation by candidate characteristics (**Table S2**). The IQR of five-year survival without a transplant was (`r wait_IQR`) and the IQR of post-transplant survival was (`r post_IQR`). The 25th percentile recipient by survival benefit had an estimated five-year survival without transplantation of `r round(100*lower_IQR_recip$S_wait)`% which improved to `r round(100*lower_IQR_recip$S_tx)`% with transplantation, an absolute survival benefit of `r round(100*lower_IQR_recip$benefit)`%. The 75th percentile recipient had a lower absolute estimated five-year survival without transplantation `r round(100*upper_IQR_recip$S_wait)`% and with transplantation `r round(100*upper_IQR_recip$S_tx)`%, however a much larger benefit from transplantation `r round(100*upper_IQR_recip$benefit)`% (**Figure 1**)
 
-Overall, there was a strong positive correlation between the risk of death without a transplant (medical urgency) and survival benefit ($\rho=$ `r round(cor(to_plot$benefit, -to_plot$S_wait, use = "complete.obs"), 2)`) (**Figure 2**). The maximum benefit from deceased donor kidney transplantation was a `r round(100*max_benefit)`% absolute improvement in five-year survival when five-year mortality without a transplant was `r max_waitlist_risk`%, corresponding to ten lives saved with every `r 10*round(1/max_benefit,1)` transplants (within the first five years).
+```{r}
+max_benefit <- to_plot %>%
+  group_by(waitlist_risk) %>%
+  summarise(mean_benefit= mean(benefit, na.rm = TRUE)) %>%
+  arrange(-mean_benefit) %>%
+  filter(row_number() ==1)
+```
+
+Overall, there was a strong positive correlation between the risk of death without a transplant (medical urgency) and survival benefit ($\rho=$ `r round(cor(to_plot$benefit, -to_plot$S_wait, use = "complete.obs"), 2)`) (**Figure 2**). The maximum benefit from deceased donor kidney transplantation was a `r round(max_benefit$mean_benefit)` LiST-5 when five-year mortality without a transplant was `r max_benefit$waitlist_risk`%, corresponding to ten lives saved with every `r 10*round(1/max_benefit$mean_benefit,1)` transplants (within the first five years).
 
 
 ```{r donor_adjusted_benefits, eval=FALSE}
@@ -883,12 +905,28 @@ l_kdpi_60 <- list(trans_time <- recips$t_1,
 recip_5yr_kdpi_60 <- pmap_dfr(l_kdpi_60, possibly_sb)
 
 write_csv(recip_5yr_kdpi_60, file = "five_year_outcomes_derivaion_cohort_kdpi_60.csv")
+
+
+l_kdpi_85 <- list(trans_time <- recips$t_1,
+          ctr <- recips$center,
+          Age <- recips$age,
+          d_time <- recips$dialysis_time_years,
+          diabetes <- recips$diabetes,
+          CAN_PREV_TX <- recips$CAN_PREV_TX,
+          ischemic_time <- rep(median_ischemic_time, length(recips$t_1)),
+          kdpi <- rep(85, length(recips$t_1)),
+          output <- rep(1825, length(recips$t_1)))
+
+recip_5yr_kdpi_85 <- pmap_dfr(l_kdpi_85, possibly_sb)
+
+write_csv(recip_5yr_kdpi_85, file = "five_year_outcomes_derivaion_cohort_kdpi_85.csv")
 ```
 
 ```{r load_in_kdpi_adjust}
 recip_5yr_donor_adjust <- read_csv("five_year_outcomes_derivaion_cohort_donor_adjusted.csv")
 recip_5yr_kdpi_15 <- read_csv("five_year_outcomes_derivaion_cohort_kdpi_15.csv")
 recip_5yr_kdpi_60 <- read_csv("five_year_outcomes_derivaion_cohort_kdpi_60.csv")
+recip_5yr_kdpi_85 <- read_csv("five_year_outcomes_derivaion_cohort_kdpi_85.csv")
 ```
 
 ```{r epts_benefit_table}
@@ -1136,6 +1174,31 @@ to_plot %>%
 Survival benefit of deceased donor kidney transplantation by the risk of death without a transplant. There is a roughly linear relationship between medical urgency and survival benefit until the most urgent candidates (five-year mortality risk without a transplantation \> 75%). Only for the most highly urgent candidates (mortality without transplant \> 95%) does the survival benefit of transplantation begins to decline.
 \pagebreak
 
+
+```{r fig_2_list}
+to_plot %>%
+  group_by(waitlist_risk) %>%
+  summarise(mean_benefit = mean(benefit, na.rm = TRUE),
+            median_benefit = median(benefit, na.rm = TRUE),
+            pct_25 = pct(benefit, 0.25),
+            pct_75 = pct(benefit, 0.75),
+            total_tx = n(),
+            sd_benefit = sd(benefit, na.rm = TRUE)) %>%
+  mutate( sd_benefit = sqrt(mean_benefit*(1-mean_benefit))) %>%
+  filter(total_tx > 100) %>%
+  mutate(lower_ci = mean_benefit- 1.96*sd_benefit/sqrt(total_tx-1),
+         lower_ci = ifelse(lower_ci < 0, 0, lower_ci),
+         upper_ci = mean_benefit + 1.96*sd_benefit/sqrt(total_tx-1)) %>%
+  #mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes")) %>%
+  ggplot(aes(x = waitlist_risk, 
+             y = mean_benefit, 
+             ymin = lower_ci, ymax = upper_ci)) +
+  geom_point() + geom_errorbar() +
+  ggthemes::theme_gdocs() + labs(x = "Five-year mortality risk without transplant (%)", y = "LiST-5")  + lims(y = c(0, 0.6))
+
+ggsave("LiST_waitlist.pdf")
+```
+
 ### Figure 3: Survival benefit of deceased donor kidney transplantation by Estimated Post-Transplant Survival (EPTS) percentile
 
 ```{r epts_plot}
@@ -1159,11 +1222,36 @@ ggsave("ddkt_sb_by_EPTS.pdf")
 ```
 
 Survival benefit of deceased donor kidney transplantation by Estimated Post-Transplant Survival (EPTS) percentile (2019 OPTN mapping table). The candidates in the top 20% EPTS (highest expected post-transplant survival) have significantly lower benefit from transplantation when compared to candidates with EPTS \> 20%.
+```{r}
+wait_by_dtime <- to_plot %>%
+  filter(dialysis_time_years >0 & dialysis_time_years< 5.5) %>%
+  mutate(d_time_years = case_when(
+    dialysis_time_years == 0 ~ 0,
+    TRUE ~ round(dialysis_time_years))) %>%
+    group_by(d_time_years) %>%
+      summarise(median_wait = median(t_1, na.rm = TRUE)) %>%
+  filter(d_time_years != 0)
+
+wait_by_dtime
+```
 
 ```{r dialysis_time_calc}
-dtime_list <- seq(0, 10, 1)
+dtime_list <- seq(0, 5, 1)
 
-l_dtime <- list(trans_time <- rep(median_prev_transplant,2*length(dtime_list)),
+median_wait_preemptive <- filter(to_plot, dialysis_time_years ==0)$t_1%>% median(na.rm = TRUE)
+
+med_dialysis_time_no_premept <- filter(to_plot, dialysis_time_years >0)$dialysis_time_years %>% median(na.rm = TRUE)
+
+median_wait_dialysis <- filter(to_plot, dialysis_time_years >0)$t_1%>% median(na.rm = TRUE)
+
+median_wait_preemptive <- filter(to_plot, dialysis_time_years ==0)$t_1%>% median(na.rm = TRUE)
+
+
+
+wait_by_dtime <- tibble(dtime_list) %>%
+  mutate(median_wait = median_wait_preemptive + 365*dtime_list)
+
+l_dtime <- list(trans_time <- rep(wait_by_dtime$median_wait, 2),
           ctr <- rep("mean center",2*length(dtime_list)),
           Age <- rep(median_age, 2*length(dtime_list)),
           d_time <- rep(dtime_list, 2),
@@ -1180,6 +1268,8 @@ possibly_sb <- possibly(survival_benefit,
 survival_benefit_dialysis_time <- pmap_dfr(l_dtime, possibly_sb) %>%
   cbind(dialysis_time = rep(dtime_list, 2),
         diabetes =c(rep(0, length(dtime_list)), rep(1, length(dtime_list))))
+
+survival_benefit_dialysis_time
 ```
 
 \pagebreak 
@@ -1191,16 +1281,30 @@ survival_benefit_dialysis_time %>%
              y = 100*benefit, fill = diabetes))+
   facet_wrap(~diabetes) + 
   geom_bar(stat = "Identity", position = "dodge" ) +
-  scale_x_continuous(breaks = seq(0,10, 1)) + 
+  scale_x_continuous(breaks = seq(0,5, 1)) + 
   labs(x = "Dialysis time (years)", fill = "", y = "Five-year survival benefit")+
   ggthemes::theme_gdocs()
 
 ggsave("dialysis_time_benefit.pdf")
 
 ```
-Five-year survival benefit of deceased donor kidney transplantation by dialysis time and history of diabetes for the median age recipient (`r median_age` years old) transplanted after `r median_t_transplant` with a `r median_kdpi`% donor kidney with `r round(median_ischemic_time)` hours of ischemic time.
+Five-year survival benefit of deceased donor kidney transplantation by dialysis time and history of diabetes for the median age recipient (`r median_age` years old) transplanted with a `r median_kdpi`% donor kidney with `r round(median_ischemic_time)` hours of ischemic time. Waiting time for preemptive transplants was `r median_wait_preemptive` compared to `r median_wait_dialysis`.
 
 
+### Figure 4 (alt): Survival benefit by time on dialysis and history of diabetes
+```{r benefit_dialysis_time_plot_list}
+survival_benefit_dialysis_time %>%
+  mutate(diabetes = ifelse(diabetes ==1, "Diabetes", "No Diabetes")) %>%
+  ggplot(aes(x = dialysis_time,
+             y = benefit, fill = diabetes))+
+  facet_wrap(~diabetes) + 
+  geom_bar(stat = "Identity", position = "dodge" ) +
+  scale_x_continuous(breaks = seq(0,5, 1)) + 
+  labs(x = "Dialysis time (years)", fill = "", y = "LiST-5")+
+  ggthemes::theme_gdocs()
+
+ggsave("dialysis_time_LiST.pdf")
+```
 
 
 ```{r survival_benefit_by_kdpi, eval = FALSE}
@@ -1223,14 +1327,17 @@ to_plot %>%
 ### Figure X: Lives Saved with Transplant (LiST) with a preemptive transplant compared to the median recipient on dialysis
 
 ```{r}
-med_dialysis_time_no_premept <- filter(to_plot, dialysis_time_years >0)$dialysis_time_years %>% median(na.rm = TRUE)
 
-dial_dm_plot <- survival_benefit(median_t_transplant, "mean center", median_age, med_dialysis_time_no_premept, 1, 0,
+dial_dm_plot <- survival_benefit(median_wait_dialysis, "mean center", median_age, med_dialysis_time_no_premept, 1, 0,
+                 median_ischemic_time,
+                 median_kdpi)
+
+dial_no_dm_plot <- survival_benefit(median_wait_dialysis, "mean center", median_age, med_dialysis_time_no_premept, 0, 0,
                  median_ischemic_time,
                  median_kdpi)
 
 
-prempt_plot <- survival_benefit(median_t_transplant, "mean center", median_age, 0, 0, 0,
+prempt_plot <- survival_benefit(median_wait_preemptive, "mean center", median_age, 0, 0, 0,
                  median_ischemic_time,
                  median_kdpi)
 
@@ -1238,7 +1345,7 @@ prememptive_vs_plot <- grid.arrange(arrangeGrob(prempt_plot +
                            theme(legend.position="none",
                                  title = element_text(size = 8)) +
                            labs(title = "Preemptive"),
-                         dial_dm_plot +  
+                         dial_no_dm_plot  +  
                            theme(legend.position="none",
                                  title = element_text(size = 8)) + 
                            labs(title = "On dialysis"),
@@ -1247,8 +1354,163 @@ prememptive_vs_plot <- grid.arrange(arrangeGrob(prempt_plot +
              nrow=2,heights=c(10, 3))
 
 
-ggsave("dial_dm_vs_preemptive.pdf", plot = prememptive_vs_plot)
+ggsave("dial_no_dm_vs_preemptive.pdf", plot = prememptive_vs_plot)
 ```
+
+
+```{r}
+survival_benefit(median_wait_dialysis, "mean center", median_age, med_dialysis_time_no_premept, 0, 0,
+                 median_ischemic_time,
+                 median_kdpi,
+                 output = "table")
+```
+
+```{r}
+survival_benefit(median_wait_preemptive, "mean center", median_age, 0, 0, 0,
+                 median_ischemic_time,
+                 median_kdpi, output = "table")
+```
+
+
+```{r}
+# high_risk <- to_plot %>%
+#   mutate(high_risk = ifelse(S_wait <= summary(to_plot$S_wait)["3rd Qu."], 1, 0)) %>%
+#   filter(high_risk ==1) %>%
+#   arrange(S_wait)
+# 
+# med_s_wait_high <- median(high_risk$S_wait, na.rm = TRUE)
+# 
+# median_high_risk_tx <- high_risk %>%
+#   filter(S_wait == med_s_wait_high)
+# 
+# median_high_risk_tx
+# 
+# high_urgency_plot <- survival_benefit(median_high_risk_tx$t_1, median_high_risk_tx$center, 
+#                  median_high_risk_tx$age, median_high_risk_tx$dialysis_time_years,
+#                  median_high_risk_tx$diabetes, median_high_risk_tx$CAN_PREV_TX,
+#                  median_high_risk_tx$ischemic_time,
+#                  median_high_risk_tx$kdpi)
+#                  
+# 
+# low_EPTS <- to_plot %>%
+#   mutate(low_EPTS = ifelse(raw_epts <= summary(to_plot$raw_epts)["1st Qu."], 1, 0)) %>%
+#   filter(low_EPTS ==1)
+# 
+# 
+# med_epts <- median(low_EPTS$raw_epts, na.rm = TRUE)
+# 
+# median_low_epts <- low_EPTS %>%
+#   mutate(diff = abs(raw_epts- med_epts)) %>%
+#   arrange(diff) %>%
+#   filter(row_number()==2)
+# 
+# median_low_epts$t_1
+# 
+# low_EPTS_plot <- survival_benefit(median_low_epts$t_1,
+#                                   median_low_epts$center,
+#                  median_low_epts$age, median_low_epts$dialysis_time_years,
+#                  median_low_epts$diabetes, median_low_epts$CAN_PREV_TX,
+#                  median_low_epts$ischemic_time,
+#                  median_low_epts$kdpi)
+```
+
+```{r}
+# high_urgency_plot_low_kdpi <- survival_benefit(median_high_risk_tx$t_1, median_high_risk_tx$center, 
+#                  median_high_risk_tx$age, median_high_risk_tx$dialysis_time_years,
+#                  median_high_risk_tx$diabetes, median_high_risk_tx$CAN_PREV_TX,
+#                  median_high_risk_tx$ischemic_time,
+#                  15)
+# 
+# high_urgency_plot_high_kdpi <- survival_benefit(median_high_risk_tx$t_1, median_high_risk_tx$center, 
+#                  median_high_risk_tx$age, median_high_risk_tx$dialysis_time_years,
+#                  median_high_risk_tx$diabetes, median_high_risk_tx$CAN_PREV_TX,
+#                  median_high_risk_tx$ischemic_time,
+#                  85)
+# 
+# low_EPTS_plot_low_kdpi <- survival_benefit(median_low_epts$t_1,
+#                                   median_low_epts$center,
+#                  median_low_epts$age, median_low_epts$dialysis_time_years,
+#                  median_low_epts$diabetes, median_low_epts$CAN_PREV_TX,
+#                  median_low_epts$ischemic_time,
+#                  15)
+# 
+# low_EPTS_plot_high_kdpi <- survival_benefit(median_low_epts$t_1,
+#                                   median_low_epts$center,
+#                  median_low_epts$age, median_low_epts$dialysis_time_years,
+#                  median_low_epts$diabetes, median_low_epts$CAN_PREV_TX,
+#                  median_low_epts$ischemic_time,
+#                  85)
+# 
+# epts_by_kdpi <- grid.arrange(arrangeGrob(low_EPTS_plot_low_kdpi + 
+#                            theme(legend.position="none",
+#                                  title = element_text(size = 8)) +
+#                            labs(title = "KDPI 15%"),
+#                          low_EPTS_plot_high_kdpi  +  
+#                            theme(legend.position="none",
+#                                  title = element_text(size = 8)) + 
+#                            labs(title = "KDPI 85%"),
+#                          nrow=1),
+#              surv_beneift_legend,
+#              nrow=2,heights=c(10, 3))
+# 
+# 
+# ggsave("epts_by_kdpi.pdf", epts_by_kdpi)
+# 
+# 
+# high_urgency_by_kdpi <- grid.arrange(arrangeGrob(high_urgency_plot_low_kdpi + 
+#                            theme(legend.position="none",
+#                                  title = element_text(size = 8)) +
+#                            labs(title = "KDPI 15%"),
+#                          high_urgency_plot_high_kdpi  +  
+#                            theme(legend.position="none",
+#                                  title = element_text(size = 8)) + 
+#                            labs(title = "KDPI 85%"),
+#                          nrow=1),
+#              surv_beneift_legend,
+#              nrow=2,heights=c(10, 3))
+# 
+# 
+# ggsave("high_urgency_by_kdpi.pdf", high_urgency_by_kdpi)
+```
+
+
+```{r}
+to_plot %>%
+  select(EPTS, S_wait, benefit) %>%
+  cbind(recip_5yr_kdpi_15 %>% select(benefit_15 = benefit),
+        recip_5yr_kdpi_60 %>% select(benefit_60 = benefit),
+        recip_5yr_kdpi_85 %>% select(benefit_85 = benefit)) %>%
+  mutate(risk_group = case_when(
+    EPTS <= 20 ~ "Top 20% EPTS",
+    S_wait <= summary(to_plot$S_wait)["3rd Qu."] ~ "Top 20% Urgent")) %>%
+  na.omit() %>%
+  group_by(risk_group) %>%
+  summarise(kdpi_15 = mean(benefit_15, na.rm = TRUE),
+            kdpi_85 = mean(benefit_85, na.rm = TRUE),
+            total= n(),
+            var_15 = var(benefit_15, na.rm = TRUE),
+            var_85 = var(benefit_85, na.rm = TRUE),
+            cov = cov(benefit_15, benefit_85)) %>%
+  mutate(difference = kdpi_15- kdpi_85,
+         var_diff = var_15 + var_85 + 2*cov,
+         se_diff = sqrt(var_diff/(total-1)),
+         low_ci_diff = difference - 1.96*se_diff,
+         up_ci_diff = difference + 1.96*se_diff
+         ) %>%
+  select(
+    "Group" = risk_group,
+    "LiST-5 with KDPI 15 (%)" = kdpi_15,
+    "LiST-5 with KDPI 85 (%)"= kdpi_85,
+    "Improvement with lower KDPI kidney" = difference,
+    low_ci_diff,
+    up_ci_diff
+  ) %>%
+  #mutate_if(is.numeric, function(x) round(100*x, 1)) %>%
+  mutate("95% CI" = paste0("(", low_ci_diff, ",", up_ci_diff, ")")) %>%
+  select(-low_ci_diff, -up_ci_diff) %>%
+  write_csv("epts_vs_urgency.csv")
+```
+
 
 \pagebreak
 ## Between-center variation in the survival benefit
@@ -1376,6 +1638,49 @@ diff_iqr <- iqr(diff_vector,1)
 There were large, statistically significant transplant center effects on the risk of death with and without transplantation (see **Table S2B** for center effects on log hazard scale). The average five-year risk of death without a transplant ranged from `r min_ctr_wait`% to `r max_ctr_wait`% (IQR [`r wait_list_iqr_center`%]). There was less between-center variation in the average five-year post-transplant survival with a median KDPI kidney (`r median_kdpi`%), ranging from `r min_ctr_post`% to `r max_ctr_post`% (IQR [`r post_list_iqr_center`%]). The correlation between average center risk of death with and without transplantation was strongly positive ($\rho$ = `r round(corr_wait_post, 2)`). The significant between-center variation in the risk of death with and without transplantation translates into substantial between-center in the survival benefit of DDKT (**Figure 5**). 
 
 The five-year survival benefit is associated with a median KDPI (`r median_kdpi`%) donor kidney varied from `r min_benefit`% to `r max_benefit`% (IQR `r benefit_iqr_center`%). In contrast, the average improvement in survival benefit of a KDPI 15% kidney compared to a KDPI 60% kidney was only `r diff_15_60`% (IQR `r diff_iqr`%).
+
+
+### Figure W: LiST-5 of transplanation at a high and low benefit center
+```{r}
+high_benefit_center <- survival_benefit(median_t_transplant, 100,
+                                        median_age, median_d_time, 0, 0,
+                 median_ischemic_time,
+                 median_kdpi)
+```
+
+```{r}
+low_benefit_center <- survival_benefit(median_t_transplant, 63,median_age, median_d_time, 0, 0,
+                 median_ischemic_time,
+                 median_kdpi)
+```
+```{r}
+high_low_benefit_center_example <- grid.arrange(arrangeGrob(low_benefit_center +
+                           theme(legend.position="none",
+                                 title = element_text(size = 8)) +
+                           labs(title = "Low benefit center"),
+                         high_benefit_center  +
+                           theme(legend.position="none",
+                                 title = element_text(size = 8)) +
+                           labs(title = "High benefit center"),
+                         nrow=1),
+             surv_beneift_legend,
+             nrow=2,heights=c(10, 3))
+
+ggsave("high_low_benefit_center.pdf", high_low_benefit_center_example)
+```
+```{r}
+survival_benefit(median_t_transplant, 63,median_age, median_d_time, 0, 0,
+                 median_ischemic_time,
+                 median_kdpi,
+                 output = "table")
+```
+
+```{r}
+survival_benefit(median_t_transplant, 100,median_age, median_d_time, 0, 0,
+                 median_ischemic_time,
+                 median_kdpi,
+                 output = "table")
+```
 
 ## Shared-decision making: Take the offer or wait for a better one?
 
