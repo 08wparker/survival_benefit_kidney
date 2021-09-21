@@ -42,24 +42,58 @@ candidates <- cand_kipa %>%
            year(CAN_LISTING_DT) <= end_year & WL_ORG == "KI" & DON_TY != "L" &
            CAN_AGE_AT_LISTING>=18)
 
-#save(candidates, file = "clean_candidate_data.R")
+
 
 first_observation <- candidates %>% 
+  mutate(earliest_death_date = pmin(PERS_OPTN_DEATH_DT,
+                           PERS_RESTRICT_DEATH_DT, PERS_SSA_DEATH_DT, na.rm = TRUE),
+         earliest_death_date = case_when(
+           CAN_REM_CD == 8 & is.na(earliest_death_date) == TRUE ~ CAN_REM_DT,
+           TRUE ~ earliest_death_date
+         )) %>%
   group_by(PERS_ID, CAN_PREV_TX) %>%
-  mutate(earliest_list_date = min(CAN_LISTING_DT)) %>% 
+  mutate(earliest_list_date = min(CAN_LISTING_DT),
+         earliest_dialysis_date = min(CAN_DIAL_DT),
+         earliest_death_date = min(earliest_death_date)) %>% 
   arrange(PERS_ID, CAN_LISTING_DT) %>%
-  filter(!CAN_REM_CD %in% c(7,14)) 
+  filter(!CAN_REM_CD %in% c(7,14)) %>%
+      mutate(earliest_death_date = case_when(
+              CAN_REM_CD == 8 & is.na(earliest_death_date) == TRUE ~ CAN_REM_DT,
+              TRUE ~ earliest_death_date)
+           )
+
+first_observation %>%
+  filter(PERS_ID ==2000096)
+
+candidates %>%
+  ungroup() %>%
+  group_by(PERS_ID) %>%
+  count(CAN_PREV_TX) %>%
+  filter(n >1)
+
 
 multiple_lists <- first_observation %>% 
-  ungroup() %>% 
-  count(PERS_ID, CAN_PREV_TX) %>%
+  ungroup() %>%
+  group_by(PERS_ID, CAN_PREV_TX) %>% 
+  mutate(n = n()) %>%
   filter(n>1) %>%
   mutate(multiple_list = 1) 
+
+multiple_lists %>%
+  select(PERS_ID, PX_ID, earliest_death_date, PERS_OPTN_DEATH_DT,
+                           PERS_RESTRICT_DEATH_DT, PERS_SSA_DEATH_DT)
+
+multiple_lists %>%
+  select(PERS_ID, PX_ID, CAN_LISTING_DT, earliest_list_date, CAN_REM_DT, CAN_REM_CD, earliest_death_date, earliest_dialysis_date) %>%
+    mutate(earliest_death_date = case_when(
+              CAN_REM_CD == 8 & is.na(earliest_death_date) == TRUE ~ CAN_REM_DT,
+              TRUE ~ earliest_death_date)
+           )
 
 multiple_listings_ids <- multiple_lists$PERS_ID
 
 multiple_lists <- multiple_lists %>% 
-  left_join(first_observation) %>%
+  #left_join(first_observation) %>%
   mutate(ddkt = ifelse(CAN_REM_CD == 4, 1, 0)) %>%
   group_by(PERS_ID, CAN_PREV_TX) %>%
   mutate(got_ddkt = sum(ddkt),
@@ -301,7 +335,6 @@ analytic_data <-  analytic_data %>%
 ```
 
 ```{r}
-#first_observation %>% filter(PX_ID == 500064)
 
 analytic_data %>%
   arrange(PERS_ID, PX_ID, t_1, t_2, tx, dead)
@@ -309,6 +342,8 @@ analytic_data %>%
 
 
 ```{r}
+#NOT RUN-> quality check code
+
 # miss_t2_can <- filter(analytic_data, is.na(t_2) & tx ==0)$PX_ID
 # 
 # 
@@ -337,14 +372,175 @@ analytic_data %>%
 
 
 ```{r}
-write_csv(analytic_data, "clean_data.csv")
-
-
 analytic_data %>%
   group_by(PX_ID) %>%
   filter(row_number()==1)
 ```
-```{r}
-summary(filter(analytic_data, tx ==0)$raw_epts)
+
+
+
+```{r kdpi_ischemic_time}
+kdpi_mapping_table <- read_csv("kdpi_mapping_table_2019.csv") %>%
+  mutate(midpoint = (max-min)/2 + min,
+         kdpi = row_number()-1) %>%
+  filter(kdpi>0 & kdpi<100)
+  
+
+KDRI_raw <- function(KDPI, scaling_factor = 1.28991045343964, mapping_table = kdpi_mapping_table){
+
+    KDRI_median <- filter(mapping_table, kdpi == KDPI)$midpoint
+  
+    KDRI_rao <- KDRI_median*scaling_factor
+  
+    log(KDRI_rao)
+}
+
+KDPI_mapper <- function(kdri, scaling_factor = 1.28991045343964, 
+                        mapping_table = kdpi_mapping_table){
+
+  KDRI_rao <- exp(kdri)
+  KDRI_median <- KDRI_rao/scaling_factor
+
+  df <- mapping_table %>%
+    mutate(cur_KDRI_median = KDRI_median) %>%
+    filter(KDRI_median> min & KDRI_median < max)
+
+  KDRI_max <- max(mapping_table$max)
+  KDRI_min <- min(mapping_table$min)
+
+  if(is.na(KDRI_median)){
+    return(KDRI_median)
+  }
+
+  if (nrow(df) > 0){
+    return(df$kdpi)
+  }
+  if (KDRI_median > KDRI_max){
+    return(100)
+  }
+  if (KDRI_median < KDRI_min) {
+    return(0)
+  }
+}
+
+to_model <- analytic_data
+
+recips <- to_model %>%
+  filter(tx ==1) %>% 
+  mutate(time = t_2 - t_1,
+         i_time_quartile = cut_number(ischemic_time, 4))
+
+
+no_cores <- availableCores() - 1
+plan(multisession, workers = no_cores)
+
+recip_kdpi <- future_map_dbl(recips$tx_kdri, KDPI_mapper)
+
+
+recips <- recips %>%
+  cbind(kdpi = recip_kdpi)
+
+recips <- recips %>% 
+  mutate(i_time_quartile = cut_number(ischemic_time, 4))
+
+
+levels_i_time <- c(levels(recips$i_time_quartile), "unknown")
+
+recips <- recips %>%
+  mutate(i_time_quartile = ifelse(is.na(i_time_quartile), "unknown", as.character(i_time_quartile)),
+         i_time_quartile = factor(i_time_quartile, levels = levels_i_time)
+  )
+
+
+# add ischemic time terms
+to_model <- to_model %>% 
+  left_join(recips %>% select(PX_ID, i_time_quartile, kdpi)) %>% 
+  mutate(i_time_low = case_when(
+    tx == 1 & i_time_quartile == levels(recips$i_time_quartile)[[1]] ~ 1,
+    TRUE ~ 0
+  ),
+  i_time_high = case_when(
+    tx == 1 & i_time_quartile == levels(recips$i_time_quartile)[[4]] ~ 1,
+    TRUE ~ 0
+  ),
+  i_time_unknown = case_when(
+    tx ==1 & i_time_quartile == levels(recips$i_time_quartile)[[5]] ~ 1,
+    TRUE ~ 0
+  )
+  )
 ```
+
+
+
+
+
+
+```{r extended_dataset}
+waitlist <- to_model %>% 
+  filter(tx == 0) %>%
+  mutate(immediate_post_trans = 0,
+         second_post_trans_int  = 0)
+
+
+first_cut <- 30
+second_cut <- 180
+
+first_post_trans_ob <- to_model %>%
+  filter(tx ==1) %>%
+  mutate(t_post_trans = t_2 -t_1,
+         t_2 = ifelse(t_post_trans > first_cut, t_1 + first_cut, t_2),
+         dead = ifelse(t_post_trans > first_cut, 0, dead)) %>%
+  select(-t_post_trans)%>%
+  mutate(immediate_post_trans = 1,
+         second_post_trans_int  = 0)
+
+
+second_post_trans_ob <- to_model %>%
+  filter(tx ==1) %>%
+  mutate(t_post_trans = t_2 -t_1) %>%
+  filter(t_post_trans > first_cut) %>%
+  mutate(t_1 = first_cut + t_1,
+         t_2 = ifelse(t_post_trans > second_cut, t_1 + second_cut - first_cut, t_2),
+         dead = ifelse(t_post_trans > second_cut, 0, dead),
+         immediate_post_trans = 0, 
+         second_post_trans_int = 1) %>%
+  select(-t_post_trans)
+
+
+third_post_trans_ob <- to_model %>%
+  filter(tx ==1) %>%
+  mutate(t_post_trans = t_2 -t_1) %>%
+  filter(t_post_trans > second_cut) %>%
+  mutate(t_1 = t_1 + second_cut,
+         immediate_post_trans = 0, 
+         second_post_trans_int = 0) %>%
+  select(-t_post_trans)
+  
+
+extended_to_model <- waitlist %>%
+  rbind(first_post_trans_ob) %>%
+  rbind(second_post_trans_ob) %>%
+  rbind(third_post_trans_ob) %>%
+  arrange(PX_ID, t_1) 
+
+extended_to_model <- extended_to_model %>%
+  group_by(center) %>%
+  mutate(total_obs_center = n()) %>%
+  filter(total_obs_center > 100 & is.na(center) == FALSE) %>%
+  ungroup()
+
+
+extended_to_model %>%
+  count(center)
+
+extended_to_model%>%
+  select(PX_ID, t_1, t_2, tx, dead, immediate_post_trans, second_post_trans_int)
+```
+
+
+```{r}
+write.csv(analytic_data, "clean_data.csv")
+write_csv(extended_to_model, "clean_data_extended.csv")
+```
+
 
