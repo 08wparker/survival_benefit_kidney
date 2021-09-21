@@ -1,8 +1,8 @@
 # Saving More Lives with Deceased Donor Kidney Transplantation
 
-William F Parker, MD, PhD [^1], Yolanda Becker MD [^1], Robert D Gibbons, PhD [^1]
+William F Parker MD, PhD,<sup>1</sup> Yolanda Becker, MD,<sup>1</sup> Robert D Gibbons, PhD.<sup>1</sup>
 
-[^1]: University of Chicago
+<sup>1</sup> University of Chicago
 
 A commissioned paper for **A Fairer and More Equitable, Cost-Effective, and Transparent System of Donor Organ Procurement, Allocation, and Distribution**, an ad-hoc study committee of the National Academies of Sciences, Engineering, and Medicine.
 
