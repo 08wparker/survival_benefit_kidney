@@ -1,7 +1,5 @@
 *
 !.gitignore
-!ddkt_survival_benefit_app.R
-!DDKT_survival_benefit_analysis.Rmd
 !clean_data.Rmd
 !README.md
 !appendix.Rmd
