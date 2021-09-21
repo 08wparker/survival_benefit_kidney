@@ -185,6 +185,93 @@ We performed all analyses using `R` version 3.6.1 (R Foundation for Statistical 
 
 ## Description of the study population
 
+
+
+```{r fit_fe_models, eval = FALSE}
+#empty_model <- "Surv(t_1, t_2, dead) ~ tx"
+
+# epts_kdri <- "Surv(t_1, t_2, dead) ~ raw_epts*tx + tx_kdri + tx_kdri:raw_epts"
+
+# full_can_cov_kdri <-  "Surv(t_1, t_2, dead) ~ (mean_centered_age + dialysis_time_years + diabetes + CAN_PREV_TX)*tx + tx_kdri + (mean_centered_age + dialysis_time_years + diabetes + CAN_PREV_TX):tx_kdri"
+
+# epts_covariates <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + ischemic_time + ischemic_time:tx_kdri"
+
+# no_shift_kdri <-  "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + ischemic_time + ischemic_time:tx_kdri"
+
+# full_plus_i_time_quartiles <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + i_time_low + i_time_high + i_time_unknown + i_time_low:tx_kdri + i_time_high:tx_kdri + i_time_unknown:tx_kdri"
+
+
+empty_model <- "Surv(t_1, t_2, dead) ~ tx+ immediate_post_trans + second_post_trans_int"
+
+no_ints <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + 
+tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + 
+i_time_low + i_time_high + i_time_unknown +  
+immediate_post_trans + second_post_trans_int"
+  
+  
+no_dm_ints <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + 
+tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*immediate_post_trans + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*second_post_trans_int +
+immediate_post_trans:tx_kdri + second_post_trans_int:tx_kdri + 
+i_time_low + i_time_high + i_time_unknown"
+
+full_model <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx +
+(age_floor_25 + log_dial_time + no_dial + CAN_PREV_TX):diabetes +
+(age_floor_25 + log_dial_time + no_dial + CAN_PREV_TX):diabetes:tx +
+tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*immediate_post_trans + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*second_post_trans_int +
+immediate_post_trans:tx_kdri + second_post_trans_int:tx_kdri + 
+i_time_low + i_time_high + i_time_unknown"
+
+  
+#formulas <- c(epts_covariates, full_plus_i_time_quartiles, final_model)
+
+formulas <- c(empty_model, no_ints, no_dm_ints, full_model)
+
+fe_models <- vector(mode = "list", length(formulas))
+hz_list <- vector(mode = "list", length(formulas))
+
+for (i in seq_along(formulas)) {
+  coxph_fe <- coxph(as.formula(formulas[[i]]), extended_to_model)
+  print(formulas[[i]])
+  print(coxph_fe)
+  fe_models[[i]] <- coxph_fe
+
+  #estimate baseline hazard function when all covariates equal to zero 
+  # Status 1A, after "Status 1A", low risk donor
+  basehz <- basehaz(coxph_fe, centered=FALSE) 
+  # %>% 
+  #   mutate(hz_t = if_else(time ==1, hazard, (hazard - lag(hazard))/(time -lag(time))), 
+  #          hz_t_time = if_else(time ==1, hz_t*time, hz_t*(time -lag(time))), 
+  #          cum_hz = cumsum(hz_t_time)) %>% select(time, hz_t)
+
+  hz_list[[i]] <- basehz
+}
+```
+
+```{r fit_me_model, eval =FALSE}
+formulas <- c(full_model)
+me_models <-  vector(mode = "list", length(formulas))  
+
+for (i in seq_along(formulas)) {
+  f_coxme <- as.formula(paste(formulas[[i]], " + (1+ tx|center)"))
+  start_time <- Sys.time()
+  cur_model <- coxme(f_coxme, data = extended_to_model)
+  me_models[[i]] <- cur_model
+  end_time <- Sys.time()
+  diff_time <- end_time - start_time
+  print(f_coxme)
+  print(diff_time)
+}
+
+save.image("model_fit_extended.RData")
+```
+
 ```{r load_data_and_recreate_raw_epts}
 load("model_fit_extended.Rdata")
 

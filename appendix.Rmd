@@ -1,0 +1,628 @@
+---
+title: "Appendix: Saving More Lives with Deceased Donor Kidney Transplantation"
+author: "William F. Parker, MD, PhD,^1^, Yolanda Becker MD^1^, Robert D. Gibbons, PhD^1^" 
+date: "^1^University of Chicago"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+    #citation_package: natbib
+  word_document:
+    reference_docx: word_style_times_new_roman_1.docx
+  html_notebook:
+    theme: journal
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+bibliography: references.bib
+csl: national-academy-science-letters.csl
+urlcolor: blue
+---
+
+```{r packages, echo=FALSE, cache=FALSE, include=FALSE}
+library(survival)
+library(coxme)
+library(tidyverse)
+library(gtsummary)
+library(knitr)
+#library(furrr)
+```
+
+```{r global_options, include=FALSE, cache = FALSE}
+library(knitr)
+opts_chunk$set(cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, linewidth=60)
+options(scipen = 999)
+```
+
+```{r convenience_functions}
+#Convenience functions 
+numextract <- function(string){
+  as.numeric(str_extract(string, "\\-*\\d+\\.*\\d*"))
+}
+comma <- function(x) format(x, digits = 3, big.mark = ",")
+comma_1 <- function(x) format(x, digits = 1, big.mark = ",")
+comma_2 <- function(x) format(x, digits = 2, big.mark = ",")
+comma_p <- function(x){
+  if (x < 0.001){
+    return("< 0.001")
+  }
+  if (x<0.01 & x>=0.001){
+    paste("=", format(x, digits = 3, big.mark = ","))
+  }
+  else{
+    paste("=", format(x, digits = 2, big.mark = ","))
+  }
+} 
+```
+
+
+```{=tex}
+\begin{center}
+A commissioned paper for \textbf{A Fairer and More Equitable, Cost-Effective, and Transparent System of Donor Organ Procurement, Allocation, and Distribution}, an ad-hoc study committee of the National Academies of Sciences, Engineering, and Medicine.
+
+July, 2021
+\end{center}
+```
+
+```{=tex}
+\setcounter{tocdepth}{2}
+\tableofcontents
+```
+
+\pagebreak
+# Data Preparation
+```{r}
+load("model_fit_extended.Rdata")
+
+full_me_model <- me_models[[1]]
+full_base_hz <- hz_list[[4]]
+```
+
+## Formal Description of the Data
+
+With candidates by $i$, centers by $k$, and donors by $j$, denote the data as:
+
+-   A vector of candidate covariates $X_{ik}(t)$, specifically the **EPTS variables** with their corresponding transformations
+
+    -   $Max(Age\, (years)-25, 0)$
+    -   $log(Years \, on \, dialysis + 1)$
+    -   $I\{ Years , on , dialysis = 0\}$
+    -   $Diabetes$
+    -   $Prior \, Solid \, Organ \, Transplant$
+
+-   Candidate death status ($Y_{ik} \in (0,1)$) and follow-up time ( $T_{ik}$). Includes death times after delisting for untransplanted candidates and post-transplant deaths
+
+-   Time-dependent indicator variable for transplantation $Tx_{i}(t)$
+
+    -   Donor quality $W_{j}$ (**KDRI Rao**)
+    -   Ischemic time $I_{ikj}$, categorized as (\<12 hours, 12-22 hours, \>22 hours, or missing)
+        
+## Table S1: Sample of final analytic dataset
+
+```{r example_data}
+extended_to_model %>% 
+  select(PX_ID, center, t_1, t_2, tx, dead, age, dialysis_time_years, diabetes, CAN_PREV_TX, tx_kdri, ischemic_time) %>%
+  mutate(tx_kdri = ifelse(tx ==1, round(exp(tx_kdri), 2), ""),
+         ischemic_time = ifelse(tx ==1, ischemic_time, ""),
+         tx = case_when(
+           tx == 1 & (t_2-t_1) <= 30 ~ "Transplant (day 0-30)",
+           tx == 1 & (t_2-t_1) <= 180 ~ "Transplant (day 30-180)",
+           tx == 1 ~ "Transplant (day 181+)",
+           TRUE ~ "Waiting"
+         )) %>%
+  filter(PX_ID %in% c(500064,470987, 480003, 648174)) %>%
+  select(PX_ID,center, age, dialysis_time_years, t_1, t_2, tx, tx_kdri, ischemic_time, dead)%>%
+  kable(col.names = c("Patient", "Ctr.", "Current age", "Dialysis time (years)", "time start", "time stop", "Status (interval start)", "KDRI (linear)","Ischemic Time", "Dead (end interval)"), digits = 2)
+```
+
+Sample of four patient records in final analytic dataset.
+
+-   Patient 470987 waited $684$ days before delisting and did not have a recorded death date so was censored at the time of delisting.
+
+-   Patient 480003 waited $2,540$ days before transplant a KDRI Rao $1.59$ kidney with $12$ hours of ischemic time. Patient 480003 was still alive at last follow-up $4,001 - 2,540 = 1,461$ days post-transplant
+
+-   Patient 500064 waited $206$ days for before DDKT with a KDRI Rao $1.1$ kidney with $14$ hours of ischemic time. After receiving this transplant, patient 500064 lived $2,476 - 206 = 2,270$ days before death.
+
+-   Patient 648174 waited $117$ days before dying without a transplant
+
+
+# Methodology
+
+## Mixed-effect Cox Proportional Hazards Model
+
+To estimate the primary outcome of survival benefit associated with DDKT, we fit a mixed-effects Cox proportional hazard model with time-dependent covariates and a non-proportional effect of transplantation [@parker2019].
+
+$$
+\begin{aligned} 
+h_{ik}(t) = & h_0(t)*exp(\beta_{0k} + X_{ik}\beta + \\
+& 1\{Transplant\}*(\beta_{1k} + \alpha_1X_{ik} + \Pi_2W_j + \zeta_1(W_j*X_{ij}) + \gamma I_{ijk}) +\\
+& 1\{Day \; 0-30 \; post \: transplant\}*(\beta_{2} + \alpha_2 X_{ik} + \Pi_2 W_j + \zeta_2(W_j*X_{ij})) + \\
+& 1\{Day \; 30-180\; post \: transplant\}*(\beta_{3} + \alpha_3 X_{ik} + \Pi_3 W_j + \zeta_3(W_j*X_{ij}))
+\end{aligned}
+$$
+
+$$\beta_{0k} = \nu_{k0}$$ 
+$$\beta_{1k} = \beta_1 + \nu_{k1}$$ 
+$$(\nu_{k0}, \nu_{k1}) \sim N(0, \Sigma)$$
+$$ \Sigma = \begin{pmatrix} \sigma_0^2 & \sigma_{01} \nonumber \\
+\sigma_{01} & \sigma_1^2
+\end{pmatrix}$$
+this model includes:
+
+-   A random intercept $\nu_{0k}$ for each center, representing risk of death without transplantation at that center. Note there is no fixed effect intercept (as this is a proportional hazards model, so the "intercept" is the baseline hazard function $h_0(t)$)
+
+-   A random transplant effect $\beta_{1k}$, which represents the change in hazard from transplant at a particular center
+
+-   A covariance matrix $\Sigma$ for the random effects, which allows for the intercept and transplant effect to be correlated
+
+-   Effect of DDKT $\beta_{1k}$ modified by the following interaction effects: 
+
+    -   Candidate factors $\alpha*X_{ij}$
+
+    -   $\Pi$: KDRI $W_j$ and $\gamma$: ischemic time
+
+    -    $\zeta$: candidate and donor interactions $W_j * X_{ik}(t)$
+
+
+## Table S2: Mixed-effects cox proportional hazards model results
+
+**Table S2A: Fixed Effect Coefficients**
+
+```{r summarise_main_model}
+
+coefs <- full_me_model$coefficients
+
+w_break <- c(coefs, "")
+
+names(w_break) <- c(names(coefs), "Transplant and interaction terms")
+
+id  <- c( seq_along(coefs), 5+0.5 )
+w_break <- w_break[order(id)]
+
+w_break_se <- c(vcov(full_me_model) %>% diag() %>% sqrt(), "")
+
+w_break_se <- w_break_se[order(id)]
+
+tibble(variable = names(w_break),
+       coef = w_break,
+       se = w_break_se) %>%
+  mutate(coef = as.numeric(w_break),
+         se = as.numeric(se),
+         up_ci = round(coef + 1.96*se, digits = 3),
+         low_ci = round(coef - 1.96*se,digits = 3),
+         coef = round(coef, digits =3),
+         ci = paste0("(", low_ci, ",", up_ci, ")"),
+       variable = case_when(
+    variable == "age_floor_25" ~ "Max(age -25, 0)",
+    variable == "log_dial_time" ~ "log(years on dialysis + 1)",
+    variable == "no_dial" ~ "Never dialyzed (pre-emeptive listing)",
+    variable == "CAN_PREV_TX" ~ "History of previous solid organ transplant",
+    variable == "diabetes" ~ "Diabetes",
+    variable == "age_floor_25:diabetes" ~ "Diabetes:Max(age -25, 0)",
+    variable == "log_dial_time:diabetes" ~ "Diabetes:log(years on dialysis + 1)",
+    variable == "no_dial:diabetes"~ "Diabetes:Never dialyzed (pre-emeptive listing)",
+    variable == "diabetes:CAN_PREV_TX" ~ "Diabetes:History of previous solid organ transplant",
+    variable == "tx" ~ "Transplantation",
+    variable == "immediate_post_trans" ~ "Day 0-30 post-transplant",
+    variable == "second_post_trans_int" ~ "Day 30-180 post-transplant",
+    variable == "tx_kdri" ~ "KDRI linear component score",
+    variable == "i_time_low" ~ "ischemic time < 12 hours",
+    variable == "i_time_high" ~ "ischemic time > 22 hours",
+    variable == "i_time_unknown" ~ "ischemic time not recorded",
+    variable == "age_floor_25:tx" ~ "transplantation:Max(age -25, 0):",
+    variable == "log_dial_time:tx" ~ "transplantation:log(years on dialysis + 1)",
+    variable == "no_dial:tx" ~ "transplantation:Never dialyzed",
+    variable == "diabetes:tx" ~ "transplantation:Diabetes",
+    variable == "CAN_PREV_TX:tx" ~ "transplantation:Previous transplant",
+    variable == "age_floor_25:diabetes:tx" ~ "Diabetes:Max(age -25, 0):Transplant",
+    variable == "log_dial_time:diabetes:tx" ~ "Diabetes:log(years on dialysis + 1):Transplant",
+    variable == "no_dial:diabetes:tx"~ "Diabetes:Never dialyzed:Transplant",
+    variable == "diabetes:CAN_PREV_TX:tx" ~ "Diabetes:Previous transplant:Transplant",
+    variable == "age_floor_25:tx_kdri" ~ "KDRI linear score:Max(age-25,0)",
+    variable == "log_dial_time:tx_kdri" ~ "KDRI linear score:log(years on dialysis + 1)",
+    variable == "no_dial:tx_kdri" ~ "KDRI linear score:Never dialyzed",
+    variable == "diabetes:tx_kdri" ~"KDRI linear score:Diabetes",
+    variable == "CAN_PREV_TX:tx_kdri" ~ "KDRI linear score:Previous transplant",
+    variable == "age_floor_25:immediate_post_trans" ~ "Day 0-30 post-transplant:Max(age -25, 0):",
+    variable == "log_dial_time:immediate_post_trans" ~ "Day 0-30 post-transplant:log(years on dialysis + 1)",
+    variable == "no_dial:immediate_post_trans" ~ "Day 0-30 post-transplant:Never dialyzed",
+    variable == "diabetes:immediate_post_trans" ~ "Day 0-30 post-transplant:Diabetes",
+    variable == "CAN_PREV_TX:immediate_post_trans" ~ "Day 0-30 post-transplant:Previous transplant",
+        variable == "age_floor_25:second_post_trans_int" ~ "Day 30-180 post-transplant:Max(age -25, 0):",
+    variable == "log_dial_time:second_post_trans_int" ~ "Day 30-180 post-transplant:log(years on dialysis + 1)",
+    variable == "no_dial:second_post_trans_int" ~ "Day 30-180 post-transplant:Never dialyzed",
+    variable == "diabetes:second_post_trans_int" ~ "Day 30-180 post-transplant:Diabetes",
+    variable == "CAN_PREV_TX:second_post_trans_int" ~ "Day 30-180 post-transplant:Previous transplant",
+    variable == "tx_kdri:immediate_post_trans" ~ "KDRI linear score:Day 0-30 post-transplant",
+    variable == "tx_kdri:second_post_trans_int" ~ "KDRI linear score:Day 30-180 post-transplant",
+    TRUE ~ variable
+  )) %>%
+  select(Variable = variable, Coefficent = coef, "95% CI" = ci) %>%
+  mutate_all(function(x) ifelse(is.na(x) == TRUE, "---", x)) %>%
+  mutate(`95% CI` = ifelse(`95% CI` == "(NA,NA)", "---", `95% CI`)) %>%
+  kable(digits = 2)
+```
+
+```{r extract_re}
+intercept_Var <- VarCorr(full_me_model)$center[1,1]
+transplant_Var <-VarCorr(full_me_model)$center[2,2]
+correlation <- VarCorr(full_me_model)$center[1,2]
+
+# tibble(name = c("Intercept (Waitlist) variance", "Transplant Effect", "Correlation"),
+#        values = c(VarCorr(full_me_model)$center[1,1], VarCorr(full_me_model)$center[2,2], VarCorr(full_me_model)$center[1,2]))
+```
+
+**Table S2B: Center-level random effects**
+
+| Term                                    | Value                                   |
+|-----------------------------------------|-----------------------------------------|
+| Variance of waitlist risk ($\nu_0$ )    | `r intercept_Var %>% round(digits =2)`  |
+| Variance of transplant effect ($\nu_1$) | `r transplant_Var %>% round(digits =2)` |
+| Correlation ($Corr(\nu_0, \nu_1)$ )     | `r correlation %>% round(digits =2)`    |
+
+```{r c_statistic}
+full_me_model <- me_models[[1]]
+lp_coxme <- predict(full_me_model)
+
+for_cstat <- extended_to_model %>%
+  select(dead, t_1, t_2, age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX, tx, tx_kdri,
+         i_time_low, i_time_high, i_time_unknown, center,
+         immediate_post_trans, second_post_trans_int) %>%
+  na.omit() %>%
+  filter(t_2 > t_1) %>%
+  select(dead, t_1, t_2) %>%
+  cbind(lp_coxme)
+
+cstat_full <- concordance(Surv(t_1, t_2, dead) ~ lp_coxme, data = for_cstat, reverse = TRUE)
+```
+
+This fit is from N = `r full_me_model$n[2] %>% comma()` adult candidates listed for kidney alone deceased donor transplant from 2005 to 2010, there were N = `r comma(full_me_model$n[1])`. The discriminatory accuracy of the model as measured by Harrel's C-statistic was `r round(cstat_full$concordance, digits =2)`. The between-center variance in survival benefit of transplant on the log hazard scale ($B_i = \nu_{1i} - \nu_{0i}$) is the variance of the difference between the two center effects, or
+
+$Var(\nu_{i1} - \nu_{i0}) = Var(v_{1i}) + Var(\nu_{0i}) - 2*Corr(v_{1i}, v_{0i})*\sigma_{v_{0i}}\sigma_{v_{1i}}$
+
+```{r var_tx_benefit}
+variance_survival_benefit <- function(me_cox){
+  variance_est <- me_cox$vcoef[[1]]
+  
+  var_wait <- variance_est[[1,1]]
+  var_tx <- variance_est[[2,2]]
+  cov_tx_wait <- variance_est[[1,2]]*sqrt(variance_est[[1,1]])*sqrt(variance_est[[2,2]])
+  
+  return(var_wait + var_tx - 2*cov_tx_wait)
+}
+
+
+```
+
+For the model estimated here, the between-center standard deviation of the survival benefit on the log hazard scale is `r variance_survival_benefit(full_me_model) %>% sqrt() %>% round(digits = 2)`
+
+
+# Lives Saved by Transplant within 5 years (LiST-5) calculation 
+
+While a hazard ratio of transplantation for each specific candidate-donor pair can be calculated directly from the coefficients in **Table S2**, an estimate of the baseline hazard function $\hat{h}_0(t)$ is required to calculate the improvement in absolute survival with DDKT. Following the previously published methodology of @parker2019, we construct estimates of survival with transplant $S(t|transplant)_{ijk}$ and survival without transplant $S(t|waitlist)_{ijk}$ from the estimated model coefficients and a Nelson-aalen estimate of the baseline hazard function $\hat{h}_{0}(t)$ (**Figure S1**).
+
+Specifically, assume candidate $X_{ik}$ has waited $t_{tx}$ days and receives an offer for kidney $W_j$ which will suffer ischemic time $I_{ikj}$ in transit. The model can generate counterfactuals for survival with and without transplant.
+
+1.  Calculate the hazard function for the patient with and without transplant
+
+    -   **with transplant**: $$\hat{h}_{ijk}(t|transplant) = \hat{h}_0(t)*(exp(\hat{\beta}_{0k} + X_{ikt}\hat{\beta} + \hat{\beta}_{1k}  + \hat{\alpha}(X_{ik})) \hat{\Pi}*(W_{j}) + \hat{\gamma}(I_{ikj})) + \hat{\zeta}(W_{j}*X_{ik}))$$
+
+    -   **without transplant** 
+    $$\hat{h}_{ijk}(t|waitlist) = \hat{h}_0(t)*(exp(\hat{\beta}_{0k} + X_{ikt}\hat{\beta} )$$
+
+
+2.  Construct survival functions from the hazard functions, comparing transplantation to waiting without transplantation.
+
+    -   **with transplant**: $$\hat{S}(t|transplant)_{ijk} = exp(-\int_{t_{tx}}^t \hat{h}_{ijk}(t|transplant)) dt$$
+
+    -   **without transplant**: $$\hat{S}(t|wait)_{ik} = exp(-\int_{t_{tx}}^t \hat{h}_{ik}(t|wait)) dt$$
+
+Note that because the effect of transplantation is non-proportional, the hazard ratio varies inside the integral, i.e. if $t > t_{tx} + 180$
+
+$$
+\begin{aligned} 
+\hat{S}(t|transplant)_{ijk} = exp(-(&\int_{t_{tx}}^{t_{tx}+30} \hat{h}_{ijk}(t|Day \; 0-30 \; post \: transplant) +\\ 
+& \int_{t_{tx}+30}^{t_{tx}+180} \hat{h}_{ijk}(t|Day \; 30-180 \; post \: transplant) + \\
+& \int_{t_{tx} + 180}^t \hat{h}_{ijk}(t|Day >180 \:post \: transplant)) \:) dt
+\end{aligned}
+$$
+
+3.  Calculate the estimated absolute survival benefit at the specified points in time
+
+    -   $LiST-1_{ijk} = \hat{S}(365 \, days|transplant)_{ijk} - \hat{S}(365 \, days|wait)_{ik}$
+    -   $LiST-5_{ijk} = \hat{S}(1825 \,days|transplant)_{ijk} - \hat{S}(1825 \,days|wait)_{ik}$
+
+\pagebreak
+### Figure S1: Non-parametric estimated of the baseline survival function $\hat{S}_0(t)$
+
+```{r baseline_hazard_plot}
+full_base_hz %>%
+  mutate(survival = exp(-hazard),
+         time = time/365) %>%
+  ggplot(aes(x = time, y = survival)) +
+  geom_step() + lims(y = c(0,1), x = c(0,5)) + 
+  labs(x = "Years after listing") + 
+  ggthemes::theme_gdocs() 
+```
+Baseline survival function for the model estimated using Cox's extension of the Nelson-Aalen estimator. This represents the survival for the base case deceased donor kidney transplantation candidate (< 25 years old, just started dialysis, without diabetes) in the absence of transplantation during the first five years on the waitlist
+
+\pagebreak
+```{r log_hazard_function}
+sum_hazard <- function(param_list,start_hazard, covariate_values, model_coef){
+        h_out <- start_hazard
+        
+        for (wp in param_list ) {
+
+          params <- str_split(wp, ":")
+          value <- prod(sapply(params[[1]], function(x) unname(covariate_values[x])))
+          #print(value)
+          beta <- unname(model_coef[wp])
+          #print(beta)
+          add_hz <- value*beta
+          #print(add_hz)
+          h_out <- h_out + add_hz
+  
+        }
+        return(h_out)
+}
+
+
+log_hazard <- function(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, 
+                            ischemic_time, kdpi,
+                            period = "wait",
+                            model= full_me_model,
+                            icuts = i_time_cuts,
+                            ...){
+  
+  no_dial <- ifelse(d_time == 0, 1,0)
+  age_floor_25 <- ifelse(Age < 25, 0, Age - 25)
+  log_dial_time <- log(d_time + 1)
+  tx_kdri <- KDRI_raw(kdpi)
+
+  i_time_low <- ifelse(ischemic_time <= icuts[[1]], 1, 0)
+  i_time_high <- ifelse(ischemic_time > icuts[[2]], 1, 0)
+  
+  user_patient_params <- c(age_floor_25, log_dial_time, no_dial, diabetes, CAN_PREV_TX, 
+                           i_time_low, i_time_high, tx_kdri)
+  
+  names(user_patient_params) <- c("age_floor_25", "log_dial_time", "no_dial", "diabetes", "CAN_PREV_TX",
+                                  "i_time_low", "i_time_high", "tx_kdri")
+  
+  user_patient_params[["i_time_unknown"]] <- 0
+
+  fixed_effects <- fixef(model)
+  x_vars <- names(fixed_effects)
+  ref <- data.frame(ranef(model)[[1]])
+  ref$center <- row.names(ref)
+  
+  if (ctr_id == "mean center"){
+    tx_ref <- 0
+    int_ref <- 0
+  } else {
+      tx_ref <- filter(ref, center == ctr_id)$tx
+      int_ref <- filter(ref, center == ctr_id)$Intercept
+  }
+  
+  if (period == "wait"){
+    entered_params <- c(user_patient_params, "tx" =0, "immediate_post_trans"=0, "second_post_trans_int" =0)
+    entered_params[["tx_kdri"]] <- 0
+    entered_params[["i_time_low"]] <- 0
+    entered_params[["i_time_high"]] <- 0
+    st_hazard <- int_ref
+  }
+  
+  if (period == "post_1"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=1, "second_post_trans_int" =0)
+      st_hazard <- int_ref + tx_ref
+  }
+  
+  if (period == "post_2"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=0, "second_post_trans_int" =1)
+      st_hazard <- int_ref + tx_ref
+  }
+  
+    if (period == "post_3"){
+      entered_params <- c(user_patient_params, "tx" =1, "immediate_post_trans"=0, "second_post_trans_int" =0)
+      st_hazard <- int_ref + tx_ref
+  }
+  # print(x_vars)
+  # print(st_hazard)
+  # print(entered_params)
+  # print(fixed_effects)
+  h_out <- sum_hazard(x_vars, st_hazard, entered_params, fixed_effects)
+  return(h_out)
+
+}
+```
+
+```{r survival_benefit_function}
+percent <- function(x, digits = 1, format = "f", ...) {      
+  paste0(formatC(x * 100, format = format, digits = digits, ...), "%")
+}
+
+survival_benefit <-  function(t_transplant, 
+                              ctr_id, 
+                              Age, d_time, diabetes, CAN_PREV_TX, 
+                              ischemic_time, kdpi,
+                              output = "plot",  
+                              me_model = full_me_model, 
+                              isch_cuts = i_time_cuts,
+                              b_hazard = full_base_hz,
+                              post_tx_int_1 = 30,
+                              post_tx_int_2 = 180){
+  
+  log_hr_w <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "wait")
+  
+  log_hr_post_1 <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "post_1") 
+  
+  log_hr_post_2 <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "post_2")              
+
+  log_hr_post_3 <- log_hazard(ctr_id, Age, d_time, diabetes, CAN_PREV_TX, ischemic_time, kdpi, 
+                                     model = me_model, icuts = isch_cuts, period = "post_3")    
+                              
+  cum_hz <- filter(b_hazard, time == t_transplant)$hazard
+  
+  df <- b_hazard %>%
+  mutate(hazard = hazard- lag(hazard),
+                   hazard = ifelse(is.na(hazard), 0, hazard)) %>%
+  filter(time >= t_transplant) %>%
+  mutate(
+    time = time - t_transplant,
+    hazard_wait = hazard*exp(log_hr_w),
+    hazard_tx = case_when(
+      time < post_tx_int_1 ~ hazard*exp(log_hr_post_1),
+      time < post_tx_int_2 ~ hazard*exp(log_hr_post_2),
+      TRUE ~ hazard*exp(log_hr_post_3)
+      ),
+    H_tx = cumsum(hazard_tx),
+    H_wait = cumsum(hazard_wait),
+    S_tx = exp(-H_tx),
+    S_wait = exp(-H_wait),
+    S_tx_better = ifelse(S_tx >= S_wait, S_tx, NA),
+    S_tx_worse = ifelse(S_tx <= S_wait, S_tx, NA),
+    S_wait_better = ifelse(S_wait >= S_tx, S_wait, NA),
+    S_wait_worse = ifelse(S_wait <= S_tx, S_wait, NA))
+  
+  if (output == "dataframe"){
+    return(df)
+  }
+  
+  if (is.numeric(output)){
+    last_ob <- df %>%
+      filter(time == output)
+  
+    if (nrow(last_ob) > 0){
+      return(last_ob %>% 
+               select(S_tx, S_wait) %>%
+               mutate(benefit = S_tx - S_wait))
+    } else {
+      
+      return(tibble(S_tx = NA, S_wait = NA, benefit = NA) %>%
+               mutate_all(as.numeric))
+    }
+  }
+  
+
+  # if (output == "wait_5"){
+  #       last_ob <- df %>%
+  #     filter(time == 1825)
+  #     
+  #       if (nrow(last_ob) > 0){
+  #           return(last_ob$S_wait)
+  #         } else {
+  #           return(NA)
+  #         }
+  # }
+  
+  plot <- df %>%
+              filter(time < 365*5) %>%
+              mutate(years_from_transplant = time/365,
+                     tx_dot = ifelse(years_from_transplant==0, 1, NA),
+                     benefit = S_tx - S_wait) %>%
+              ggplot(aes(x = years_from_transplant)) +
+              geom_ribbon(aes(ymin = S_wait_worse, ymax = S_tx_better, fill = "Survival Benefit"), alpha = 0.5) +
+              geom_step(aes(y = S_tx, color = "Post-Transplant"), size = 1.1) +
+              geom_step(aes(y = S_wait, color = "Waitlist"), size = 1.1) +
+              geom_point(aes(y= tx_dot, shape= "Transplant"), size = 5, colour = "darkgreen") +
+                scale_x_continuous(breaks = seq(0, 5)) + 
+               ggthemes::theme_gdocs() +
+                   labs(y = "Survival", x = "Time (years after transplant)", shape = "") +
+                guides(shape = guide_legend(order = 1), color = guide_legend(order = 2), fill = guide_legend(order = 3))
+  
+  if (output == "plot"){
+      return(plot +
+               scale_color_manual(name = "Survival function", values=c("blue", "red")) +
+               scale_fill_manual(name = NULL, values=c("skyblue")) +
+               lims(y = c(0,1))
+             )
+  }
+  
+  if (output == "plot_w_benefit"){
+      return(plot + 
+               geom_step(aes(y = benefit, color = "Survival benefit"), size = 1.1) + 
+               scale_color_manual(name = "Survival function", values=c("blue", "darkgreen", "red")) +
+               scale_fill_manual(name = NULL, values=c("darkgreen")) 
+             )
+  }
+
+  if (output == "rmst"){
+    rmst_df <-df %>%
+        mutate(days = (S_tx - S_wait)*(time-lag(time)),
+               days = ifelse(row_number() == 1, 0, days),
+         rmst = cumsum(days))
+      return(
+         paste0("DDKT would improve survival by ", round(filter(rmst_df, time == 5*365)$rmst/365, digits = 1), " years on average within the first 5 years following transplant")
+        )
+    }
+  if (output == "table"){
+        benefit_df <- df %>%
+      filter(time %in% c( 365, 3*365, 5*365))
+
+
+    return(
+      benefit_df %>%
+      mutate(S_tx = S_tx,
+             S_wait = S_wait,
+             surv_benefit = S_tx - S_wait,
+             years_from_transplant = time/365) %>%
+      select("Years from transplant" = years_from_transplant,
+             "Survival (transplant)" = S_tx,
+             "Survival (waitlist)" = S_wait,
+             "Absolute Survival Benefit" = surv_benefit) %>%
+          mutate(across(c(2,3,4), percent)) %>%
+        kable()
+      )
+
+  }
+
+}
+```
+
+\pagebreak
+## Figure S2: The non-proportional effect of transplantation 
+
+```{r}
+load("EPTS_values.Rdata")
+extended_to_model <- extended_to_model %>%
+  cbind(EPTS) 
+
+recips <- extended_to_model %>% 
+  filter(tx ==1 & immediate_post_trans ==1) %>%
+  select(PX_ID, center, age, age_floor_25, dialysis_time_years, log_dial_time, no_dial, diabetes, CAN_PREV_TX, 
+         tx,immediate_post_trans, second_post_trans_int, 
+         ischemic_time, i_time_low, i_time_high, i_time_unknown, tx_kdri, 
+         t_1, t_2, dead, 
+         raw_epts, EPTS,
+         REC_TX_DT) %>%
+  na.omit()
+i_time_cuts <- quantile(recips$ischemic_time, na.rm = TRUE, probs = c(0.25, 0.75))
+```
+
+
+```{r}
+survival_benefit(700, "mean center", 55, 3, 0, 0, 20, 40) + 
+  lims(y = c(0.95, 1), x = c(0, 250/365))
+```
+Visualization of the non-proportional hazard of transplantation for a 55-year old recipient with 3 years of dialysis time transplanted after 700 days of waiting. In the first 30 days post-transplant, the risk of death is actually higher compared to remaining on the wait-list. In days 30-180, the benefit of transplantation outweighs the post-surgical risks. After day 180 post-op, the benefit of transplantation increases further.
+\pagebreak
+
+
+# Shared decision making tool: Take the offer or wait for a better one?
+
+## Formal description
+
+When a candidate receives a deceased donor kidney offer, they have two options:
+
+1.  Accept kidney $W_{j}$ after $t_a$ time on the wait-list. This generates the post-transplant survival function and survival benefit generated by our standard model.
+
+$$\hat{S}(t|accept \, W_j)_{ijk} = exp(-\int_{t_{a}}^t \hat{h}_{ijk}(t|transplant \, W_{j})) dt$$
+
+2.  Reject kidney $W_{j}$ and wait until time $t_b = t_a + \Delta t$ to get a better kidney $W_{m}$. This patient experiences a several discontinuities in estimated hazard, starting off with waitlist risk during the waiting period ( $\hat{h}(wait)$ for time $(t_a, t_b)$ )and then transitioning to post-transplant risk after accepting the better kidney $W_m$ ($\hat{h}(transplant \, W_m)$ for all time after $t_b$)
+
+$$\hat{S}(t|wait \,for \, W_m)_{ijk} = exp(-(\int_{t_{a}}^{t_b} \hat{h}_{ijk}(t|wait)dt + \int_{t_b}^t\hat{h}_{ijk}(t|transplant \, W_{m})dt))$$
+
+\pagebreak
+# References
