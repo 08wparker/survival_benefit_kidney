@@ -1,0 +1,630 @@
+---
+title: "Prepare analytic dataset for the survival benefit of deceased donor kidney transplantation"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(haven)
+library(lubridate)
+```
+
+
+```{r}
+cand_kipa <- haven::read_sas("data/cand_kipa.sas7bdat")
+
+tx_ki <- haven::read_sas("data/tx_ki.sas7bdat")
+
+#donors <- haven::read_sas("data/donor_deceased.sas7bdat")
+# epts <- haven::read_sas("data/epts.sas7bdat")
+# kdpi <-  haven::read_sas("data/kdpi.sas7bdat")
+```
+
+
+
+```{r}
+start_year <- 2005 
+end_year <- 2010
+
+candidates <- cand_kipa %>%
+  select(PX_ID, PERS_ID, WL_ORG, CAN_LISTING_DT, center = CAN_LISTING_CTR_ID,
+         DON_TY,
+         CAN_AGE_AT_LISTING,
+         CAN_AGE_IN_MONTHS_AT_LISTING,
+         CAN_DIAB_TY,
+         CAN_DIAL,CAN_DIAL_DT,
+         CAN_PREV_TX,
+         CAN_REM_CD, CAN_REM_DT, CAN_DEATH_DT,
+         PERS_OPTN_DEATH_DT, PERS_RESTRICT_DEATH_DT, PERS_RESTRICT_DEATH_VRFY, PERS_SSA_DEATH_DT,
+         REC_TX_PROCEDURE_TY, REC_TX_DT) %>%
+  filter(year(CAN_LISTING_DT) >= start_year & 
+           year(CAN_LISTING_DT) <= end_year & WL_ORG == "KI" & DON_TY != "L" &
+           CAN_AGE_AT_LISTING>=18)
+
+
+
+first_observation <- candidates %>% 
+  mutate(earliest_death_date = pmin(PERS_OPTN_DEATH_DT,
+                           PERS_RESTRICT_DEATH_DT, PERS_SSA_DEATH_DT, na.rm = TRUE),
+         earliest_death_date = case_when(
+           CAN_REM_CD == 8 & is.na(earliest_death_date) == TRUE ~ CAN_REM_DT,
+           TRUE ~ earliest_death_date
+         )) %>%
+  group_by(PERS_ID, CAN_PREV_TX) %>%
+  mutate(earliest_list_date = min(CAN_LISTING_DT),
+         earliest_dialysis_date = min(CAN_DIAL_DT),
+         earliest_death_date = min(earliest_death_date)) %>% 
+  arrange(PERS_ID, CAN_LISTING_DT) %>%
+  filter(!CAN_REM_CD %in% c(7,14)) %>%
+      mutate(earliest_death_date = case_when(
+              CAN_REM_CD == 8 & is.na(earliest_death_date) == TRUE ~ CAN_REM_DT,
+              TRUE ~ earliest_death_date)
+           )
+
+first_observation %>%
+  filter(PERS_ID ==2000096)
+
+candidates %>%
+  ungroup() %>%
+  group_by(PERS_ID) %>%
+  count(CAN_PREV_TX) %>%
+  filter(n >1)
+
+
+multiple_lists <- first_observation %>% 
+  ungroup() %>%
+  group_by(PERS_ID, CAN_PREV_TX) %>% 
+  mutate(n = n()) %>%
+  filter(n>1) %>%
+  mutate(multiple_list = 1) 
+
+multiple_lists %>%
+  select(PERS_ID, PX_ID, earliest_death_date, PERS_OPTN_DEATH_DT,
+                           PERS_RESTRICT_DEATH_DT, PERS_SSA_DEATH_DT)
+
+multiple_lists %>%
+  select(PERS_ID, PX_ID, CAN_LISTING_DT, earliest_list_date, CAN_REM_DT, CAN_REM_CD, earliest_death_date, earliest_dialysis_date) %>%
+    mutate(earliest_death_date = case_when(
+              CAN_REM_CD == 8 & is.na(earliest_death_date) == TRUE ~ CAN_REM_DT,
+              TRUE ~ earliest_death_date)
+           )
+
+multiple_listings_ids <- multiple_lists$PERS_ID
+
+multiple_lists <- multiple_lists %>% 
+  #left_join(first_observation) %>%
+  mutate(ddkt = ifelse(CAN_REM_CD == 4, 1, 0)) %>%
+  group_by(PERS_ID, CAN_PREV_TX) %>%
+  mutate(got_ddkt = sum(ddkt),
+         first_date = min(CAN_LISTING_DT),
+         selected_list = case_when(
+           got_ddkt ==1 & ddkt ==1 ~ 1,
+           
+           got_ddkt == 0 & CAN_LISTING_DT == first_date ~ 1,
+           TRUE ~ 0
+         )) %>%
+  ungroup() %>%
+  select(PX_ID, selected_list)
+
+first_observation <- first_observation %>% 
+  left_join(multiple_lists) %>% 
+  filter(is.na(selected_list)==TRUE| selected_list ==1) %>% 
+  select(-selected_list) %>% 
+  ungroup()
+```
+
+
+
+# Cleaning notes
+
+* Selected all adult, kidney-alone candidates from `r start_year` to `r end_year`
+
+* If a patient has multiple listings, the earliest time point is selected to start the time on risk. Duplicate listings are removed.
+
+* candidates who are delisted without transplant (`tx`) are followed until they die
+  * if no death for a delisted candidate is recorded, then the observation is censored at the time of delisting or last observed status on the waitlist
+  
+* Post-transplant graft failure is currently ignored in this analysis. Patients are followed from time of kidney-alone transplantation forward until death.
+
+* Post-transplant follow-up for recipients is until death or last follow clinic follow-up
+
+
+
+
+
+```{r}
+tx_details <- tx_ki %>% 
+  filter(PX_ID %in% candidates$PX_ID & CAN_REM_CD == 4) %>% 
+  select(PX_ID, PERS_ID, center = REC_CTR_ID, TFL_LASTATUS, TFL_LAFUDATE, REC_TX_DT,
+                             age = REC_AGE_AT_TX,REC_DIAL_DT, REC_DIAL_TY, CAN_DIAB_TY, CAN_PREV_TX, 
+         DONOR_ID,
+                             DON_AGE, DON_RACE,
+                 DON_HGT_CM, DON_WGT_KG,
+                 DON_HIST_HYPERTEN,
+                 DON_HIST_DIAB,
+                DON_CAD_DON_COD,
+                 DON_COD_DON_STROKE,
+                 DON_CREAT, DON_KI_CREAT_PREOP, 
+                 DON_ANTI_HCV,
+                 DON_NON_HR_BEAT,
+                REC_COLD_ISCH_TM) %>%
+    left_join(candidates %>% select(PX_ID, CAN_DIAL_DT)) %>%
+  mutate(donor_creat = ifelse(is.na(DON_CREAT), DON_KI_CREAT_PREOP, DON_CREAT),
+           tx_kdri = 
+           0.0128*(DON_AGE - 40) + ifelse(DON_AGE<18, -0.0194*(DON_AGE - 18), 0) + ifelse(DON_AGE>50, 0.0107*(DON_AGE - 50),0) +
+           (-0.0464*(DON_HGT_CM -170))/10  + ifelse(DON_WGT_KG< 80, -0.0199*(DON_WGT_KG - 80)/5, 0) +
+           ifelse(DON_RACE == 16, 0.1790, 0) + 
+           ifelse(DON_HIST_HYPERTEN %in% c(2,3,4,5), 0.1260, 0) + ifelse(DON_HIST_DIAB %in% c(2,3,4,5), 0.1300, 0) +
+           ifelse(DON_COD_DON_STROKE == 1 |  DON_CAD_DON_COD == 2, 0.0881, 0) +
+           0.2200*(donor_creat-1) + ifelse(donor_creat > 1.5, -0.2090*(donor_creat-1.5), 0) +
+           ifelse(DON_ANTI_HCV == "P", 0.2400, 0) +
+           ifelse(DON_NON_HR_BEAT == "Y", 0.1330, 0),
+         diabetes = ifelse(CAN_DIAB_TY %in% c(2,3,4,5), 1, 0),
+         start_dial_date = pmin(CAN_DIAL_DT, REC_DIAL_DT, na.rm = TRUE),
+         dialysis_time_years =  (REC_TX_DT - start_dial_date)/365,
+         dialysis_time_years = ifelse(is.na(dialysis_time_years)| dialysis_time_years<0, 0, dialysis_time_years),
+         raw_epts = max(age- 25, 0)*(0.047 - 0.015*diabetes) +
+           CAN_PREV_TX*(0.398- 0.237*diabetes)+
+           log(dialysis_time_years + 1)*(0.315 - 0.099*diabetes) +
+           ifelse(dialysis_time_years ==0, 1, 0)*(0.130 - 0.348*diabetes) +  
+           1.262*diabetes
+         ) 
+```
+
+
+
+```{r}
+# TEST KDPI CALCULATION
+# kdpi_2018 <- donors %>%
+#   filter(year(DON_RECOV_DT) == 2018 & DON_TY == "C") %>%
+#   mutate(donor_creat = ifelse(is.na(DON_CREAT), DON_FINAL_SERUM_CREAT, DON_CREAT),
+#          light_donor = ifelse(DON_WGT_KG <80, 1, 0),
+#          young_donor = ifelse(DON_AGE < 18, 1, 0),
+#          old_donor = ifelse(DON_AGE>50,1,0),
+#          don_dm = ifelse(DON_HIST_DIAB %in% c(2,3,4,5), 1, 0),
+#          aa_donor = ifelse(DON_RACE == 16, 1, 0),
+#          don_htn = ifelse(DON_HIST_HYPERTEN %in% c(2,3,4,5), 1, 0),
+#          don_stroke = ifelse(DON_COD_DON_STROKE == 1 |  DON_CAD_DON_COD == 2, 1, 0),
+#          hcv = ifelse(DON_ANTI_HCV == "P", 1, 0),
+#          dcd =ifelse(DON_NON_HR_BEAT == "Y",1, 0),
+#            tx_kdri = 
+#            0.0128*(DON_AGE - 40) + -0.0194*young_donor*(DON_AGE - 18) + 0.0107*old_donor*(DON_AGE - 50) +
+#            (-0.0464*(DON_HGT_CM -170))/10  +  -0.0199*light_donor*(DON_WGT_KG - 80)/5 +
+#            0.1790*aa_donor + 0.1260*don_htn + 0.1300*don_dm  +
+#            don_stroke*0.0881 +
+#            0.2200*(donor_creat-1) + ifelse(donor_creat > 1.5, -0.2090*(donor_creat-1.5), 0) +
+#            0.2400*hcv + 
+#            0.1330*dcd) %>% 
+#   left_join(kdpi, by = "DONOR_ID") %>% 
+#   select(DONOR_ID, KDPI_AT_ALLOCATION, tx_kdri, DON_TX,
+#          DON_AGE, DON_CREAT, DON_FINAL_SERUM_CREAT, DON_HGT_CM, DON_WGT_KG,
+#          DON_RACE, DON_HIST_HYPERTEN, DON_HIST_DIAB,
+#          DON_COD_DON_STROKE, DON_CAD_DON_COD,
+#          DON_ANTI_HCV, DON_NON_HR_BEAT) %>%
+#   mutate(KDRI_Rao = exp(tx_kdri),
+#          KDRI_median = KDRI_Rao/1.2506957544151)
+# 
+# summary(kdpi_2018$KDRI_Rao)
+# 
+# max_value <- max(kdpi_2018$KDRI_Rao, na.rm = TRUE)
+# 
+# kdpi_2018 %>% 
+#   filter(KDRI_Rao == max_value) 
+# 
+# quantile(kdpi_2018$KDRI_median, na.rm = TRUE)
+# 
+# kdpi_2018 %>%
+#   ggplot(aes(x = KDRI_Rao)) +
+#   geom_histogram()
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+first_observation <- first_observation %>%
+  left_join(tx_details %>% select(PX_ID, REC_DIAL_DT)) %>%
+  mutate(death_date = case_when(
+                          CAN_REM_CD == 8 ~ CAN_REM_DT,
+                          TRUE ~ pmin(PERS_OPTN_DEATH_DT,
+                           PERS_RESTRICT_DEATH_DT, PERS_SSA_DEATH_DT, na.rm = TRUE)),
+           t_1 = CAN_LISTING_DT - CAN_LISTING_DT,
+         t_2 = case_when(
+           CAN_REM_CD == 4 ~ CAN_REM_DT - CAN_LISTING_DT,
+           is.na(death_date) == FALSE ~ death_date- CAN_LISTING_DT,
+           TRUE ~ CAN_REM_DT - CAN_LISTING_DT),
+         dead = case_when(
+           CAN_REM_CD == 8 ~ 1,
+           CAN_REM_CD == 4 ~ 0,
+           is.na(death_date) == FALSE ~ 1,
+           TRUE ~ 0
+         ),
+         tx = 0,
+         age = CAN_AGE_AT_LISTING,
+         diabetes = ifelse(CAN_DIAB_TY %in% c(2,3,4,5), 1, 0),
+         start_dial_date = pmin(CAN_DIAL_DT, REC_DIAL_DT, na.rm = TRUE),
+         dialysis_time_years =  (CAN_LISTING_DT - start_dial_date)/365,
+         dialysis_time_years = ifelse(is.na(dialysis_time_years) | dialysis_time_years<0, 0, dialysis_time_years),
+         no_dial = ifelse(dialysis_time_years ==0, 1, 0),
+         age_floor_25 = ifelse(age<25 , 0, age-25),
+         raw_epts = 0.047*age_floor_25 - 0.015*diabetes*age_floor_25+
+           0.398*CAN_PREV_TX- 0.237*diabetes*CAN_PREV_TX+
+           0.315*log(dialysis_time_years + 1)- 0.099*diabetes*log(dialysis_time_years + 1) +
+           0.130*no_dial - 0.348*no_dial +  
+           1.262*diabetes
+         )
+
+first_observation 
+```
+
+```{r}
+recipient_observation <- tx_details %>%
+  left_join(first_observation %>% select(PX_ID, death_date, CAN_LISTING_DT, t_2)) %>%
+  mutate(dead = case_when(
+    is.na(death_date) == FALSE ~  1, 
+    TFL_LASTATUS == "D" ~ 1,
+    TRUE ~ 0),
+        tx = 1,
+         t_1 = t_2,
+         t_2 = case_when(
+           is.na(death_date) == FALSE ~ death_date - CAN_LISTING_DT,
+           TRUE ~ TFL_LAFUDATE - CAN_LISTING_DT)
+        )
+
+
+analytic_data <- first_observation %>%
+  select(PERS_ID, PX_ID, center,t_1, t_2,tx,  dead, center,
+         age,
+         dialysis_time_years,
+         diabetes,
+         CAN_PREV_TX,
+         raw_epts) %>%
+  mutate(tx_kdri = 0,
+         ischemic_time = 0) %>%
+  rbind(recipient_observation %>%
+  select(PERS_ID, PX_ID, center, t_1, t_2, tx,dead, tx_kdri, 
+         age,
+         dialysis_time_years,
+         diabetes,
+         CAN_PREV_TX,
+         raw_epts,
+         ischemic_time = REC_COLD_ISCH_TM))%>%
+  arrange(PERS_ID, PX_ID, t_1) 
+
+mean_age <- mean(filter(analytic_data %>% group_by(PERS_ID), row_number()==1)$age)
+
+analytic_data <- analytic_data %>% 
+  mutate(mean_centered_age = age-mean_age,
+         age_floor_25 = ifelse(age <25, 0, age-25),
+         log_dial_time = log(dialysis_time_years + 1),
+         no_dial = ifelse(dialysis_time_years == 0, 1, 0)
+         )
+
+
+## for candidates no removal date from waitlist or death date, censor at either last active or inactive status date
+analytic_data <-  analytic_data %>%
+  left_join(cand_kipa %>% select(PX_ID,  CAN_LISTING_DT,  CAN_LAST_ACT_STAT_DT,CAN_LAST_INACT_STAT_DT)) %>%
+  left_join(tx_ki %>% select(PX_ID, REC_TX_DT, TFL_LAFUDATE)) %>% 
+  mutate(last_date_waitlist = case_when(
+    tx == 0 ~ pmax(CAN_LAST_ACT_STAT_DT, CAN_LAST_INACT_STAT_DT, na.rm = TRUE)),
+    t_1 = case_when(
+      tx ==1 & is.na(t_1) ~ as.numeric(REC_TX_DT - CAN_LISTING_DT),
+      TRUE ~ as.numeric(t_1)
+    ),
+    t_2 = case_when(
+      tx ==0 & is.na(t_2) ~ as.numeric(last_date_waitlist - CAN_LISTING_DT),
+      tx == 1 & is.na(t_2) ~ as.numeric(TFL_LAFUDATE - CAN_LISTING_DT),
+      TRUE ~ as.numeric(t_2)),
+    t_2 = case_when(
+      tx ==0 & t_1 == 0 & t_2 ==0 ~ 1,
+      tx == 1 & t_1 == t_2 ~ t_2 + 1,
+      TRUE ~ t_2
+    ),
+
+    ) 
+```
+
+
+
+```{r}
+# Check dialysis time
+# analytic_data %>% 
+#   group_by(PX_ID) %>% 
+#   mutate(dial_time_diff = 365*(lead(dialysis_time_years) - dialysis_time_years)) %>%
+#   select(PX_ID, t_1, t_2, tx, dead, dialysis_time_years, dial_time_diff) %>% 
+#   filter(dial_time_diff < 0 )
+```
+
+```{r}
+
+analytic_data %>%
+  arrange(PERS_ID, PX_ID, t_1, t_2, tx, dead)
+```
+
+
+```{r}
+#NOT RUN-> quality check code
+
+# miss_t2_can <- filter(analytic_data, is.na(t_2) & tx ==0)$PX_ID
+# 
+# 
+# first_observation %>%
+#   filter(PX_ID %in% miss_t2_can) %>%
+#   left_join(cand_kipa %>% select(PX_ID, CAN_INIT_ACT_STAT_DT, CAN_LAST_ACT_STAT_DT,CAN_LAST_INACT_STAT_DT, CAN_ACTIVATE_DT, CAN_DIAL_DT, CAN_DEATH_DT)) %>%
+#   select(PX_ID, t_1, t_2, CAN_LISTING_DT, CAN_INIT_ACT_STAT_DT,  CAN_LAST_ACT_STAT_DT,CAN_LAST_INACT_STAT_DT, CAN_ACTIVATE_DT,CAN_DIAL_DT, CAN_REM_CD, CAN_REM_DT, death_date, raw_epts)
+# 
+# miss_t2_recip <- filter(analytic_data, is.na(t_2) & tx ==1)$PX_ID
+# 
+# recipient_observation %>%
+#   filter(PX_ID %in% miss_t2_recip)
+```
+
+
+```{r}
+# bad_dates <- filter(analytic_data, t_2 == t_1)$PX_ID
+# 
+# analytic_data %>%
+#   filter(PX_ID %in% bad_dates) %>%
+#   arrange(PX_ID, t_1)%>%
+# select(PX_ID, t_1, t_2, tx, CAN_LISTING_DT, CAN_REM_CD, CAN_REM_DT, death_date)
+```
+
+
+
+
+```{r}
+analytic_data %>%
+  group_by(PX_ID) %>%
+  filter(row_number()==1)
+```
+
+
+
+```{r kdpi_ischemic_time}
+kdpi_mapping_table <- read_csv("kdpi_mapping_table_2019.csv") %>%
+  mutate(midpoint = (max-min)/2 + min,
+         kdpi = row_number()-1) %>%
+  filter(kdpi>0 & kdpi<100)
+  
+
+KDRI_raw <- function(KDPI, scaling_factor = 1.28991045343964, mapping_table = kdpi_mapping_table){
+
+    KDRI_median <- filter(mapping_table, kdpi == KDPI)$midpoint
+  
+    KDRI_rao <- KDRI_median*scaling_factor
+  
+    log(KDRI_rao)
+}
+
+KDPI_mapper <- function(kdri, scaling_factor = 1.28991045343964, 
+                        mapping_table = kdpi_mapping_table){
+
+  KDRI_rao <- exp(kdri)
+  KDRI_median <- KDRI_rao/scaling_factor
+
+  df <- mapping_table %>%
+    mutate(cur_KDRI_median = KDRI_median) %>%
+    filter(KDRI_median> min & KDRI_median < max)
+
+  KDRI_max <- max(mapping_table$max)
+  KDRI_min <- min(mapping_table$min)
+
+  if(is.na(KDRI_median)){
+    return(KDRI_median)
+  }
+
+  if (nrow(df) > 0){
+    return(df$kdpi)
+  }
+  if (KDRI_median > KDRI_max){
+    return(100)
+  }
+  if (KDRI_median < KDRI_min) {
+    return(0)
+  }
+}
+
+to_model <- analytic_data
+
+recips <- to_model %>%
+  filter(tx ==1) %>% 
+  mutate(time = t_2 - t_1,
+         i_time_quartile = cut_number(ischemic_time, 4))
+
+
+no_cores <- availableCores() - 1
+plan(multisession, workers = no_cores)
+
+recip_kdpi <- future_map_dbl(recips$tx_kdri, KDPI_mapper)
+
+
+recips <- recips %>%
+  cbind(kdpi = recip_kdpi)
+
+recips <- recips %>% 
+  mutate(i_time_quartile = cut_number(ischemic_time, 4))
+
+
+levels_i_time <- c(levels(recips$i_time_quartile), "unknown")
+
+recips <- recips %>%
+  mutate(i_time_quartile = ifelse(is.na(i_time_quartile), "unknown", as.character(i_time_quartile)),
+         i_time_quartile = factor(i_time_quartile, levels = levels_i_time)
+  )
+
+
+# add ischemic time terms
+to_model <- to_model %>% 
+  left_join(recips %>% select(PX_ID, i_time_quartile, kdpi)) %>% 
+  mutate(i_time_low = case_when(
+    tx == 1 & i_time_quartile == levels(recips$i_time_quartile)[[1]] ~ 1,
+    TRUE ~ 0
+  ),
+  i_time_high = case_when(
+    tx == 1 & i_time_quartile == levels(recips$i_time_quartile)[[4]] ~ 1,
+    TRUE ~ 0
+  ),
+  i_time_unknown = case_when(
+    tx ==1 & i_time_quartile == levels(recips$i_time_quartile)[[5]] ~ 1,
+    TRUE ~ 0
+  )
+  )
+```
+
+
+
+
+
+
+```{r extended_dataset}
+waitlist <- to_model %>% 
+  filter(tx == 0) %>%
+  mutate(immediate_post_trans = 0,
+         second_post_trans_int  = 0)
+
+
+first_cut <- 30
+second_cut <- 180
+
+first_post_trans_ob <- to_model %>%
+  filter(tx ==1) %>%
+  mutate(t_post_trans = t_2 -t_1,
+         t_2 = ifelse(t_post_trans > first_cut, t_1 + first_cut, t_2),
+         dead = ifelse(t_post_trans > first_cut, 0, dead)) %>%
+  select(-t_post_trans)%>%
+  mutate(immediate_post_trans = 1,
+         second_post_trans_int  = 0)
+
+
+second_post_trans_ob <- to_model %>%
+  filter(tx ==1) %>%
+  mutate(t_post_trans = t_2 -t_1) %>%
+  filter(t_post_trans > first_cut) %>%
+  mutate(t_1 = first_cut + t_1,
+         t_2 = ifelse(t_post_trans > second_cut, t_1 + second_cut - first_cut, t_2),
+         dead = ifelse(t_post_trans > second_cut, 0, dead),
+         immediate_post_trans = 0, 
+         second_post_trans_int = 1) %>%
+  select(-t_post_trans)
+
+
+third_post_trans_ob <- to_model %>%
+  filter(tx ==1) %>%
+  mutate(t_post_trans = t_2 -t_1) %>%
+  filter(t_post_trans > second_cut) %>%
+  mutate(t_1 = t_1 + second_cut,
+         immediate_post_trans = 0, 
+         second_post_trans_int = 0) %>%
+  select(-t_post_trans)
+  
+
+extended_to_model <- waitlist %>%
+  rbind(first_post_trans_ob) %>%
+  rbind(second_post_trans_ob) %>%
+  rbind(third_post_trans_ob) %>%
+  arrange(PX_ID, t_1) 
+
+extended_to_model <- extended_to_model %>%
+  group_by(center) %>%
+  mutate(total_obs_center = n()) %>%
+  filter(total_obs_center > 100 & is.na(center) == FALSE) %>%
+  ungroup()
+
+
+extended_to_model %>%
+  count(center)
+
+extended_to_model%>%
+  select(PX_ID, t_1, t_2, tx, dead, immediate_post_trans, second_post_trans_int)
+```
+
+
+```{r}
+write.csv(analytic_data, "clean_data.csv")
+write_csv(extended_to_model, "clean_data_extended.csv")
+```
+
+
+```{r fit_fe_models, eval = FALSE}
+#empty_model <- "Surv(t_1, t_2, dead) ~ tx"
+
+# epts_kdri <- "Surv(t_1, t_2, dead) ~ raw_epts*tx + tx_kdri + tx_kdri:raw_epts"
+
+# full_can_cov_kdri <-  "Surv(t_1, t_2, dead) ~ (mean_centered_age + dialysis_time_years + diabetes + CAN_PREV_TX)*tx + tx_kdri + (mean_centered_age + dialysis_time_years + diabetes + CAN_PREV_TX):tx_kdri"
+
+# epts_covariates <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + ischemic_time + ischemic_time:tx_kdri"
+
+# no_shift_kdri <-  "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + ischemic_time + ischemic_time:tx_kdri"
+
+# full_plus_i_time_quartiles <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + tx_kdri + (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + i_time_low + i_time_high + i_time_unknown + i_time_low:tx_kdri + i_time_high:tx_kdri + i_time_unknown:tx_kdri"
+
+
+empty_model <- "Surv(t_1, t_2, dead) ~ tx+ immediate_post_trans + second_post_trans_int"
+
+no_ints <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + 
+tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + 
+i_time_low + i_time_high + i_time_unknown +  
+immediate_post_trans + second_post_trans_int"
+  
+  
+no_dm_ints <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx + 
+tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*immediate_post_trans + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*second_post_trans_int +
+immediate_post_trans:tx_kdri + second_post_trans_int:tx_kdri + 
+i_time_low + i_time_high + i_time_unknown"
+
+full_model <- "Surv(t_1, t_2, dead) ~ (age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*tx +
+(age_floor_25 + log_dial_time + no_dial + CAN_PREV_TX):diabetes +
+(age_floor_25 + log_dial_time + no_dial + CAN_PREV_TX):diabetes:tx +
+tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX):tx_kdri + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*immediate_post_trans + 
+(age_floor_25 + log_dial_time + no_dial + diabetes + CAN_PREV_TX)*second_post_trans_int +
+immediate_post_trans:tx_kdri + second_post_trans_int:tx_kdri + 
+i_time_low + i_time_high + i_time_unknown"
+
+  
+#formulas <- c(epts_covariates, full_plus_i_time_quartiles, final_model)
+
+formulas <- c(empty_model, no_ints, no_dm_ints, full_model)
+
+fe_models <- vector(mode = "list", length(formulas))
+hz_list <- vector(mode = "list", length(formulas))
+
+for (i in seq_along(formulas)) {
+  coxph_fe <- coxph(as.formula(formulas[[i]]), extended_to_model)
+  print(formulas[[i]])
+  print(coxph_fe)
+  fe_models[[i]] <- coxph_fe
+
+  #estimate baseline hazard function when all covariates equal to zero 
+  # Status 1A, after "Status 1A", low risk donor
+  basehz <- basehaz(coxph_fe, centered=FALSE) 
+  # %>% 
+  #   mutate(hz_t = if_else(time ==1, hazard, (hazard - lag(hazard))/(time -lag(time))), 
+  #          hz_t_time = if_else(time ==1, hz_t*time, hz_t*(time -lag(time))), 
+  #          cum_hz = cumsum(hz_t_time)) %>% select(time, hz_t)
+
+  hz_list[[i]] <- basehz
+}
+```
+
+```{r fit_me_model, eval =FALSE}
+formulas <- c(full_model)
+me_models <-  vector(mode = "list", length(formulas))  
+
+for (i in seq_along(formulas)) {
+  f_coxme <- as.formula(paste(formulas[[i]], " + (1+ tx|center)"))
+  start_time <- Sys.time()
+  cur_model <- coxme(f_coxme, data = extended_to_model)
+  me_models[[i]] <- cur_model
+  end_time <- Sys.time()
+  diff_time <- end_time - start_time
+  print(f_coxme)
+  print(diff_time)
+}
+
+save.image("model_fit_extended.RData")
+```
