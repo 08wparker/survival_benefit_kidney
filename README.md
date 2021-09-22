@@ -8,6 +8,8 @@ A commissioned paper for [A Fairer and More Equitable, Cost-Effective, and Trans
 
 September, 2021
 
+**This paper is a pre-print and has not been externally peer reviewed.**
+
 
 ## Repository Contents
 
