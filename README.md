@@ -11,13 +11,14 @@ September, 2021
 
 ## Repository Contents
 
-* Code
-  * Data preparation and cleaning: `clean_data.Rmd`
-  * Model fitting, post-estimation analysis, and main report generation `DDKT_survival_benefit_analysis.Rmd`
+* Main Analysis code
+  * Data preparation and Model fitting: `data_prep_model_fit.Rmd`
+  * Post-estimation analysis and main report generation `post_estimation_analysis_report.Rmd`
   * Supplemental analysis and statistical appendix `appendix.Rmd`
+
+* Shiny apps code
   * main survival benefit webapp script: `ddkt_survival_benefit_app.R`
   * shared decision making tool script: `ddkt_compare_app.R`
-  
   
 * Reports
   * main manuscript: `saving_lives_with_ddkt_report.pdf`
