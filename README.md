@@ -6,10 +6,6 @@ William F Parker MD, PhD,<sup>1</sup> Yolanda Becker, MD,<sup>1</sup> Robert D G
 
 A commissioned paper for [A Fairer and More Equitable, Cost-Effective, and Transparent System of Donor Organ Procurement, Allocation, and Distribution](https://www.nationalacademies.org/our-work/a-fairer-and-more-equitable-cost-effective-and-transparent-system-of-donor-organ-procurement-allocation-and-distribution), an ad-hoc study committee of the National Academies of Sciences, Engineering, and Medicine.
 
-September, 2021
-
-**This paper is a pre-print and has not been externally peer reviewed.**
-
 
 ## Repository Contents
 
